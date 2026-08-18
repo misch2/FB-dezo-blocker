@@ -1,54 +1,45 @@
 # Facebook Reaction Blocker
 
-Bezpečnostně konzervativní prototyp userscriptu pro Tampermonkey. Z otevřeného dialogu reakcí u facebookového příspěvku načte profilové odkazy a umí je následně zpracovat v jednom ze tří režimů:
-
-- **Nanečisto** – pouze ukáže, které profily by zpracoval. Nic na Facebooku nemění.
-- **Asistovaný** – navštíví profily postupně a před konečným potvrzením každého blokování se zeptá.
-- **Automatický** – potvrzuje blokování bez další otázky. Používej až po ověření předchozích režimů.
+Tampermonkey skript, který načte profily z vybrané reakce u příspěvku na Facebooku a postupně je zablokuje.
 
 ## Instalace
 
-1. Do Chromu nainstaluj rozšíření [Tampermonkey](https://www.tampermonkey.net/).
-2. V nabídce Tampermonkey povol **Allow User Scripts / Povolit uživatelské skripty**. Pokud se nahoře zobrazuje modré upozornění „Please enable the 'Allow User Scripts' extension setting“, klikni na odkaz v něm a příslušný přepínač zapni v nastavení rozšíření.
+1. Nainstaluj [Tampermonkey](https://www.tampermonkey.net/).
+2. V nastavení rozšíření zapni **Allow User Scripts / Povolit uživatelské skripty**.
 3. V Tampermonkey zvol **Create a new script / Vytvořit nový skript**.
-4. Nahraď výchozí obsah souborem [`facebook-reaction-blocker.user.js`](./facebook-reaction-blocker.user.js) a ulož jej (`Ctrl+S`).
-5. Otevři Facebook nebo již otevřenou stránku obnov pomocí `Ctrl+R`. Vpravo dole se zobrazí panel **Reaction Blocker**.
+4. Vlož obsah souboru [`facebook-reaction-blocker.user.js`](./facebook-reaction-blocker.user.js) a ulož ho pomocí `Ctrl+S`.
+5. Obnov Facebook pomocí `Ctrl+R`. Vpravo se zobrazí panel **Reaction Blocker**.
 
-### Panel se nezobrazuje
+Pokud panel chybí, zkontroluj, že je Tampermonkey i skript zapnutý, rozšíření má přístup k Facebooku a volba **Allow User Scripts** je povolená.
 
-Zkontroluj v nabídce Tampermonkey následující:
+## Použití
 
-- Tampermonkey hlásí stav **Enabled**.
-- Nezobrazuje se hlášení **Tampermonkey has no access to this page**.
-- Volba **Allow User Scripts** je zapnutá.
-- Skript **Facebook Reaction Blocker** je v přehledu Tampermonkey zapnutý.
-- Po změně oprávnění byla stránka Facebooku obnovena pomocí `Ctrl+R`.
+1. Otevři konkrétní příspěvek.
+2. Otevři seznam reakcí a ručně vyber požadovaný typ reakce.
+3. V panelu klikni na **Načíst otevřenou reakci**.
+4. Zkontroluj počet, jména a ikonky reakcí načtených profilů.
+5. Nejprve spusť režim **Nanečisto**.
+6. Pokud seznam souhlasí, načti reakci znovu a použij **Asistovaný** nebo **Automatický** režim.
 
-## Doporučený první test
+### Režimy
 
-1. Otevři konkrétní příspěvek na samostatné stránce.
-2. Klikni na souhrn reakcí, aby se otevřel seznam reagujících.
-3. V dialogu Facebooku ručně vyber reakci, kterou chceš zpracovat. Tento krok je záměrně ruční, aby skript nemohl zaměnit příspěvek nebo typ reakce.
-4. V panelu klikni na **Načíst otevřenou reakci**. Skript dialog postupně posouvá a sbírá profilové odkazy.
-5. Prohlédni si počet a názvy. Nastav rozumné maximum, poprvé například 2–3 profily.
-6. Nech zvolený režim **Nanečisto** a klikni na **Spustit**.
-7. Pokud náhled odpovídá očekávání, načti dialog znovu a vyzkoušej **Asistovaný** režim s jedním testovacím profilem.
+- **Nanečisto** – zobrazí, které profily by skript zpracoval, ale nic nezmění.
+- **Asistovaný** – před zablokováním každého profilu požádá o potvrzení.
+- **Automatický** – zpracuje načtené profily bez jednotlivých potvrzení.
 
-Nikdy nepokračuj, pokud názvy v panelu přesně neodpovídají otevřenému seznamu reakcí. Verze 0.1.2 a novější zobrazuje v souhrnu také rozpoznanou vybranou reakci a odmítne skenovat, pokud bezpečně nerozezná dialog reakcí. Od verze 0.1.3 je u každého profilu zobrazena ikonka načtená přímo z jeho řádku na Facebooku; pokud některá ikonka chybí, asistovaný ani automatický režim nelze spustit. Verze 0.1.4 podporuje nové facebookové potvrzovací tlačítko **Potvrdit**, ale přijme je pouze v dialogu s titulkem **Zablokovat [jméno]?**, který odpovídá právě zpracovávanému profilu. Verze 0.1.5 navíc správně zpracuje facebookový prvek, který má „Potvrdit“ současně jako přístupnostní i viditelný popisek. Fronty vytvořené staršími verzemi se po aktualizaci záměrně nenačítají.
+Pro první ostrý test nastav maximum na jeden profil a použij asistovaný režim.
 
-## Ovládání a zotavení z chyby
+## Ovládání
 
-- **Pauza** zastaví přechod na další profil. Kliknutí, které už proběhlo, nelze odvolat.
-- **Pokračovat** opakuje aktuální krok po pozastavení.
-- **Přeskočit** označí aktuální profil jako přeskočený a pokračuje dalším.
-- **Stop** ukončí běh, ale nemaže frontu ani protokol.
-- **Zpět na příspěvek** se vrátí na stránku, ze které byla fronta načtena.
-- **Vymazat frontu** smaže uloženou frontu a místní protokol Tampermonkey.
-
-Fronta je uložená pomocí úložiště Tampermonkey, takže přežije přechody mezi profilovými stránkami. Skript neposílá data na žádný externí server.
+- **Pauza** – pozastaví zpracování.
+- **Pokračovat** – zopakuje aktuální krok po pozastavení nebo chybě.
+- **Přeskočit** – přeskočí aktuální profil.
+- **Stop** – ukončí běh a ponechá načtenou frontu.
+- **Zpět na příspěvek** – vrátí se k původnímu příspěvku.
+- **Vymazat frontu** – smaže načtené profily a protokol.
 
 ## Omezení
 
-Facebook nemá pro tyto prvky stabilní veřejné selektory a jejich text se liší podle jazyka účtu. Prototyp rozpoznává běžné české a anglické popisky, ale po změně rozhraní se bezpečně pozastaví, pokud nabídku nebo potvrzení nerozezná. Nikdy nepovažuj náhodné prodlevy za záruku, že Facebook automatizaci neomezí.
-
-Před použitím ostrého režimu vždy spusť režim nanečisto. Za výběr profilů a následky blokování odpovídá uživatel.
+- Facebook může své rozhraní změnit. Pokud skript potřebný prvek nerozpozná, pozastaví se.
+- Blokování se vztahuje pouze na konkrétní profil. Další profily stejného člověka Facebook pouze částečně omezí a skript je nedokáže spolehlivě dohledat.
+- Fronta a protokol zůstávají uložené pouze v Tampermonkey a neposílají se na externí server.
