@@ -17,7 +17,7 @@
 (function () {
   'use strict';
 
-  const STORAGE_KEY = 'fdb-job-v1';
+  const STORAGE_KEY = 'fdb-job-v2';
   const PANEL_ID = 'fdb-panel';
   const MAX_SCAN_ROUNDS = 80;
   const NO_GROWTH_LIMIT = 5;
@@ -70,7 +70,7 @@
 
   function defaultState() {
     return {
-      version: 1,
+      version: 2,
       sourceUrl: '',
       queue: [],
       currentIndex: 0,
@@ -91,7 +91,7 @@
 
   function getState() {
     const state = GM_getValue(STORAGE_KEY, null);
-    return state && state.version === 1 ? { ...defaultState(), ...state } : defaultState();
+    return state && state.version === 2 ? { ...defaultState(), ...state } : defaultState();
   }
 
   function setState(state) {
@@ -174,7 +174,10 @@
       .map((dialog) => ({ dialog, score: reactionDialogScore(dialog) }))
       .filter((candidate) => candidate.score >= 300);
     if (!candidates.length) return null;
-    return candidates.sort((a, b) => {
+    const deepestCandidates = candidates.filter((candidate) =>
+      !candidates.some((other) => other !== candidate && candidate.dialog.contains(other.dialog))
+    );
+    return deepestCandidates.sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
       const ar = a.dialog.getBoundingClientRect();
       const br = b.dialog.getBoundingClientRect();

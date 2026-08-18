@@ -34,6 +34,8 @@ Zkontroluj v nabídce Tampermonkey následující:
 6. Nech zvolený režim **Nanečisto** a klikni na **Spustit**.
 7. Pokud náhled odpovídá očekávání, načti dialog znovu a vyzkoušej **Asistovaný** režim s jedním testovacím profilem.
 
+Nikdy nepokračuj, pokud názvy v panelu přesně neodpovídají otevřenému seznamu reakcí. Verze 0.1.2 a novější zobrazuje v souhrnu také rozpoznanou vybranou reakci a odmítne skenovat, pokud bezpečně nerozezná dialog reakcí. Fronty vytvořené staršími verzemi se po aktualizaci záměrně nenačítají.
+
 ## Ovládání a zotavení z chyby
 
 - **Pauza** zastaví přechod na další profil. Kliknutí, které už proběhlo, nelze odvolat.

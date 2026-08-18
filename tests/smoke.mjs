@@ -38,10 +38,10 @@ try {
   await page.setContent(`<!doctype html>
     <html><body>
       <main><h1>Testovací příspěvek</h1></main>
-      <div role="dialog" aria-label="Příspěvek" style="width: 900px; min-height: 700px">
+      <div id="post-dialog" role="dialog" aria-label="Příspěvek" style="width: 900px; min-height: 700px">
         <a href="https://www.facebook.com/page-owner">Autor stránky</a>
         <a href="https://www.facebook.com/wrong-commenter">Komentující mimo reakce</a>
-        <div role="dialog" aria-label="Lidé, kteří zareagovali" style="width: 500px; min-height: 300px">
+        <div id="reactions-dialog" role="dialog" aria-label="Lidé, kteří zareagovali" style="width: 500px; min-height: 300px">
           <div role="tablist">
             <button role="tab" aria-label="Zobrazit všechny lidi, kteří zareagovali">Vše</button>
             <button role="tab" aria-selected="true" aria-label="Zobrazit 2 lidi, kteří zareagovali pomocí Haha">2</button>
@@ -73,6 +73,10 @@ try {
 
   await page.addScriptTag({ content: fs.readFileSync('facebook-reaction-blocker.user.js', 'utf8') });
   await page.locator('#fdb-panel').waitFor();
+  const selectedDialogId = await page.evaluate(() => window.__FDB_INTERNALS__.findReactionDialog()?.id);
+  if (selectedDialogId !== 'reactions-dialog') {
+    throw new Error(`Expected the nested reaction dialog, got: ${selectedDialogId}`);
+  }
   const fixtureUrls = await page.locator('[role="dialog"] a').evaluateAll((anchors) => anchors.map((anchor) => ({
     href: anchor.href,
     cleaned: window.__FDB_INTERNALS__.cleanProfileUrl(anchor.href),
