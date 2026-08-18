@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Facebook Reaction Blocker (safe prototype)
 // @namespace    https://github.com/michal/facebook-dezo-blocker
-// @version      0.1.4
+// @version      0.1.5
 // @description  Collect profiles from an opened Facebook reaction dialog and block them one by one.
 // @author       FacebookDezoBlocker contributors
 // @match        https://www.facebook.com/*
@@ -341,6 +341,14 @@
     ].filter(Boolean).join(' '));
   }
 
+  function labelPartsOf(element) {
+    return [
+      element.getAttribute('aria-label'),
+      element.getAttribute('title'),
+      element.innerText
+    ].map(compact).filter(Boolean);
+  }
+
   function findProfileOptionsButton() {
     const root = document.querySelector('[role="main"]') || document.querySelector('main') || document.body;
     const candidates = [...root.querySelectorAll('button, [role="button"]')]
@@ -417,7 +425,8 @@
       if (!visible(element)) return false;
       const label = labelOf(element);
       const isExplicitBlock = matchesAny(label, LABELS.block) && !matchesAny(label, LABELS.forbiddenBlock);
-      return isExplicitBlock || matchesAny(label, LABELS.confirm);
+      const isConfirmation = labelPartsOf(element).some((part) => matchesAny(part, LABELS.confirm));
+      return isExplicitBlock || isConfirmation;
     }) || null;
   }
 
@@ -646,7 +655,7 @@
   function panelMarkup() {
     return `
       <header>
-        <strong>Reaction Blocker</strong>
+        <strong>Reaction Blocker 0.1.5</strong>
         <button id="fdb-collapse" class="fdb-icon" title="Sbalit">−</button>
       </header>
       <div id="fdb-body">

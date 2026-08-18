@@ -150,7 +150,7 @@ try {
 
     const confirmation = document.createElement('div');
     confirmation.setAttribute('role', 'dialog');
-    confirmation.innerHTML = '<h2>Zablokovat Alice Example?</h2><p>Alice už nebude moct zobrazit váš profil.</p><button>Zrušit</button><button>Potvrdit</button>';
+    confirmation.innerHTML = '<h2>Zablokovat Alice Example?</h2><p>Alice už nebude moct zobrazit váš profil.</p><button>Zrušit</button><div role="button" tabindex="0" aria-label="Potvrdit">Potvrdit</div>';
     document.body.appendChild(confirmation);
 
     const unrelatedConfirmation = document.createElement('div');
