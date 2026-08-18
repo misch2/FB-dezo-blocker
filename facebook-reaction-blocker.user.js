@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Facebook Reaction Blocker (safe prototype)
 // @namespace    https://github.com/michal/facebook-dezo-blocker
-// @version      0.1.2
+// @version      0.1.3
 // @description  Collect profiles from an opened Facebook reaction dialog and block them one by one.
 // @author       FacebookDezoBlocker contributors
 // @match        https://www.facebook.com/*
@@ -17,7 +17,7 @@
 (function () {
   'use strict';
 
-  const STORAGE_KEY = 'fdb-job-v2';
+  const STORAGE_KEY = 'fdb-job-v3';
   const PANEL_ID = 'fdb-panel';
   const MAX_SCAN_ROUNDS = 80;
   const NO_GROWTH_LIMIT = 5;
@@ -70,7 +70,7 @@
 
   function defaultState() {
     return {
-      version: 2,
+      version: 3,
       sourceUrl: '',
       queue: [],
       currentIndex: 0,
@@ -91,7 +91,7 @@
 
   function getState() {
     const state = GM_getValue(STORAGE_KEY, null);
-    return state && state.version === 2 ? { ...defaultState(), ...state } : defaultState();
+    return state && state.version === 3 ? { ...defaultState(), ...state } : defaultState();
   }
 
   function setState(state) {
@@ -200,20 +200,61 @@
     return { name: 'Neznámý profil', quality: 0 };
   }
 
+  function safeReactionIconUrl(rawUrl) {
+    try {
+      const baseUrl = /^https?:/i.test(location.origin) ? location.origin : 'https://www.facebook.com/';
+      const url = new URL(rawUrl, baseUrl);
+      const trustedHost = url.hostname === 'facebook.com'
+        || url.hostname.endsWith('.facebook.com')
+        || url.hostname === 'fbcdn.net'
+        || url.hostname.endsWith('.fbcdn.net');
+      return url.protocol === 'https:' && trustedHost ? url.toString() : '';
+    } catch (_error) {
+      return '';
+    }
+  }
+
+  function reactionIconUrlFromAnchor(anchor, dialog) {
+    let candidateRow = anchor;
+    for (let level = 0; candidateRow && candidateRow !== dialog && level < 12; level += 1) {
+      const rowRect = candidateRow.getBoundingClientRect();
+      if (rowRect.width >= 200 && rowRect.height >= 36 && rowRect.height <= 96) {
+        const icon = [...candidateRow.querySelectorAll('img[src]')].find((image) => {
+          if (!visible(image)) return false;
+          const rect = image.getBoundingClientRect();
+          return rect.width >= 10 && rect.width <= 26
+            && rect.height >= 10 && rect.height <= 26
+            && Boolean(safeReactionIconUrl(image.src));
+        });
+        if (icon) return safeReactionIconUrl(icon.src);
+      }
+      candidateRow = candidateRow.parentElement;
+    }
+    return '';
+  }
+
   function collectProfiles(dialog, profiles) {
     for (const anchor of dialog.querySelectorAll('a[href]')) {
       const url = cleanProfileUrl(anchor.href);
       if (!url) continue;
       const identity = profileIdentityFromAnchor(anchor);
       const existing = profiles.get(url);
-      if (!existing || identity.quality > existing.nameQuality) {
+      const reactionIconUrl = reactionIconUrlFromAnchor(anchor, dialog);
+      if (!existing) {
         profiles.set(url, {
           name: identity.name,
           nameQuality: identity.quality,
+          reactionIconUrl,
           url,
           status: 'pending',
           note: ''
         });
+      } else {
+        if (identity.quality > existing.nameQuality) {
+          existing.name = identity.name;
+          existing.nameQuality = identity.quality;
+        }
+        if (!existing.reactionIconUrl && reactionIconUrl) existing.reactionIconUrl = reactionIconUrl;
       }
     }
   }
@@ -265,6 +306,7 @@
       const state = getState();
       const limit = readNumber('fdb-max', state.maxProfiles, 1, 200);
       const queue = [...profiles.values()].slice(0, limit);
+      const missingIcons = queue.filter((target) => !target.reactionIconUrl).length;
       state.sourceUrl = location.href;
       state.queue = queue;
       state.reactionLabel = selectedReactionLabel(dialog);
@@ -276,9 +318,11 @@
       setState(state);
       setNotice(
         queue.length
-          ? `Hotovo: ${queue.length} profilů. Zkontroluj náhled před spuštěním.`
+          ? missingIcons
+            ? `Načteno ${queue.length} profilů, ale u ${missingIcons} chybí ikonka reakce. Ostrý režim je zablokovaný.`
+            : `Hotovo: ${queue.length} profilů včetně ikon reakcí. Zkontroluj náhled před spuštěním.`
           : 'V dialogu jsem nenašel profilové odkazy. Zkontroluj, že je otevřený seznam reakcí.',
-        queue.length ? 'ok' : 'error'
+        queue.length && !missingIcons ? 'ok' : 'error'
       );
     } finally {
       busy = false;
@@ -424,6 +468,12 @@
       addLog(state, `Režim nanečisto dokončen pro ${state.queue.length} profilů; nic nebylo změněno.`);
       setState(state);
       setNotice('Režim nanečisto dokončen. Nebyl zablokován žádný profil.', 'ok');
+      return;
+    }
+
+    const missingIcons = state.queue.filter((target) => !target.reactionIconUrl).length;
+    if (missingIcons) {
+      setNotice(`Ostrý režim nelze spustit: u ${missingIcons} profilů chybí načtená ikonka reakce. Načti seznam reakcí znovu.`, 'error');
       return;
     }
 
@@ -643,6 +693,9 @@
       #${PANEL_ID} .fdb-row { display: flex; gap: 6px; padding: 4px 6px; border-bottom: 1px solid #eee; }
       #${PANEL_ID} .fdb-row:last-child { border-bottom: 0; }
       #${PANEL_ID} .fdb-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #${PANEL_ID} .fdb-reaction-icon { flex: 0 0 auto; width: 18px; height: 18px; object-fit: contain; }
+      #${PANEL_ID} .fdb-reaction-missing { flex: 0 0 auto; width: 18px; color: #b3261e; text-align: center; font-weight: bold; }
+      #${PANEL_ID} .fdb-target-status { flex: 0 0 auto; margin-left: auto; color: #606770; }
       #${PANEL_ID} #fdb-notice { display: none; margin-top: 8px; padding: 7px; border-radius: 5px; }
       #${PANEL_ID} #fdb-notice.ok { display: block; background: #e7f5e9; color: #176b2c; }
       #${PANEL_ID} #fdb-notice.error { display: block; background: #fde8e8; color: #9b1c1c; }
@@ -697,8 +750,11 @@
     ui.querySelector('#fdb-list').innerHTML = shown.length
       ? shown.map((target, index) => `
           <div class="fdb-row" title="${escapeHtml(target.note || target.url)}">
-            <span>${targetStatusIcon(target.status)}</span>
+            ${target.reactionIconUrl
+              ? `<img class="fdb-reaction-icon" src="${escapeHtml(target.reactionIconUrl)}" alt="Načtená reakce">`
+              : '<span class="fdb-reaction-missing" title="Ikonka reakce nebyla načtena">!</span>'}
             <span class="fdb-name">${escapeHtml(`${start + index + 1}. ${target.name}`)}</span>
+            <span class="fdb-target-status" title="Stav zpracování">${targetStatusIcon(target.status)}</span>
           </div>`).join('')
       : '<div class="fdb-row"><span>Fronta je prázdná.</span></div>';
     ui.querySelector('#fdb-log').textContent = (state.log || []).join('\n');
@@ -728,6 +784,8 @@
       cleanProfileUrl,
       findReactionDialog,
       reactionDialogScore,
+      reactionIconUrlFromAnchor,
+      safeReactionIconUrl,
       findProfileOptionsButton,
       findBlockMenuItem,
       findConfirmationDialog,

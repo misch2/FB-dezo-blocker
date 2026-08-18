@@ -46,11 +46,18 @@ try {
             <button role="tab" aria-label="Zobrazit všechny lidi, kteří zareagovali">Vše</button>
             <button role="tab" aria-selected="true" aria-label="Zobrazit 2 lidi, kteří zareagovali pomocí Haha">2</button>
           </div>
-          <a href="https://www.facebook.com/alice"><img alt="Profilový obrázek Alice"></a>
-          <a href="https://www.facebook.com/alice">Alice Example</a>
-          <button>Přidat přítele</button>
-          <a href="https://www.facebook.com/profile.php?id=12345">Bob Example</a>
-          <button>Přidat přítele</button>
+          <div class="profile-row" style="display:flex; width:450px; height:52px">
+            <a href="https://www.facebook.com/alice"><svg role="img" aria-label="Alice Example" width="40" height="40"></svg></a>
+            <img data-reaction src="https://scontent.example.fbcdn.net/reactions/haha.png" alt="" style="width:16px; height:16px">
+            <a href="https://www.facebook.com/alice">Alice Example</a>
+            <button>Přidat přítele</button>
+          </div>
+          <div class="profile-row" style="display:flex; width:450px; height:52px">
+            <a href="https://www.facebook.com/profile.php?id=12345"><svg role="img" aria-label="Bob Example" width="40" height="40"></svg></a>
+            <img data-reaction src="https://scontent.example.fbcdn.net/reactions/haha.png" alt="" style="width:16px; height:16px">
+            <a href="https://www.facebook.com/profile.php?id=12345">Bob Example</a>
+            <button>Přidat přítele</button>
+          </div>
           <a href="https://www.facebook.com/groups/not-a-profile">Skupina</a>
           <a href="https://www.facebook.com/alice/posts/12345">Příspěvek Alice</a>
         </div>
@@ -92,7 +99,7 @@ try {
     return notice && !notice.textContent.includes('Načítám');
   }, { timeout: 10000 });
   const scanNotice = await page.locator('#fdb-notice').innerText();
-  if (!scanNotice.includes('Hotovo: 2 profilů.')) {
+  if (!scanNotice.includes('Hotovo: 2 profilů včetně ikon reakcí.')) {
     const urlError = await page.evaluate(() => window.__FDB_LAST_URL_ERROR__);
     throw new Error(`Unexpected scan result: ${scanNotice}; urlError=${urlError}; fixture=${JSON.stringify(fixtureUrls)}`);
   }
@@ -106,6 +113,18 @@ try {
   if (queuedText.some((text) => /Autor stránky|Komentující mimo reakce/.test(text))) {
     throw new Error(`Profiles from the parent post dialog leaked into the reaction queue: ${queuedText.join(', ')}`);
   }
+  const renderedIcons = page.locator('#fdb-list .fdb-reaction-icon');
+  if (await renderedIcons.count() !== 2) {
+    throw new Error(`Expected 2 rendered reaction icons, got ${await renderedIcons.count()}`);
+  }
+  const iconSources = await renderedIcons.evaluateAll((icons) => icons.map((icon) => icon.getAttribute('src')));
+  if (iconSources.some((src) => src !== 'https://scontent.example.fbcdn.net/reactions/haha.png')) {
+    throw new Error(`Unexpected reaction icon sources: ${JSON.stringify(iconSources)}`);
+  }
+  const unsafeIconAccepted = await page.evaluate(() =>
+    window.__FDB_INTERNALS__.safeReactionIconUrl('https://attacker.example/reaction.png')
+  );
+  if (unsafeIconAccepted) throw new Error('An untrusted reaction icon host was accepted.');
 
   await page.locator('#fdb-start').click();
   await page.getByText('Režim nanečisto dokončen.').waitFor();
