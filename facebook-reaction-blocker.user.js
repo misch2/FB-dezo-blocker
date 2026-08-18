@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Facebook Reaction Blocker (safe prototype)
 // @namespace    https://github.com/michal/facebook-dezo-blocker
-// @version      0.1.1
+// @version      0.1.2
 // @description  Collect profiles from an opened Facebook reaction dialog and block them one by one.
 // @author       FacebookDezoBlocker contributors
 // @match        https://www.facebook.com/*
@@ -83,6 +83,7 @@
         profileMax: 8000
       },
       maxProfiles: 25,
+      reactionLabel: '',
       log: [],
       createdAt: new Date().toISOString()
     };
@@ -143,14 +144,47 @@
     return cleanProfileUrl(left) === cleanProfileUrl(right);
   }
 
-  function findVisibleDialog() {
+  function reactionDialogScore(dialog) {
+    const tabs = [...dialog.querySelectorAll('[role="tab"]')];
+    const selectedTab = tabs.find((tab) => tab.getAttribute('aria-selected') === 'true');
+    const tabLabels = tabs.map(labelOf).join(' ');
+    const selectedLabel = selectedTab ? labelOf(selectedTab) : '';
+    const profileUrls = new Set(
+      [...dialog.querySelectorAll('a[href]')]
+        .map((anchor) => cleanProfileUrl(anchor.href))
+        .filter(Boolean)
+    );
+    const hasReactionWording = /zareag|reagoval|reacted|reactions?|to se mi líbí|haha|super|péče|štve|love|care|angry/i.test(tabLabels);
+    const selectedHasReactionWording = /zareag|reagoval|reacted|reactions?|to se mi líbí|haha|super|péče|štve|love|care|angry/i.test(selectedLabel);
+    const hasFriendControls = [...dialog.querySelectorAll('button, [role="button"]')]
+      .some((element) => /přidat přítele|add friend/i.test(labelOf(element)));
+
+    let score = 0;
+    if (tabs.length >= 2 && hasReactionWording) score += 150;
+    if (selectedTab && selectedHasReactionWording) score += 150;
+    if (profileUrls.size >= 1) score += Math.min(50, profileUrls.size * 5);
+    if (hasFriendControls) score += 30;
+    if (dialog.parentElement?.closest('[role="dialog"]')) score += 20;
+    return score;
+  }
+
+  function findReactionDialog() {
     const dialogs = [...document.querySelectorAll('[role="dialog"]')].filter(visible);
-    if (!dialogs.length) return null;
-    return dialogs.sort((a, b) => {
-      const ar = a.getBoundingClientRect();
-      const br = b.getBoundingClientRect();
-      return (br.width * br.height) - (ar.width * ar.height);
-    })[0];
+    const candidates = dialogs
+      .map((dialog) => ({ dialog, score: reactionDialogScore(dialog) }))
+      .filter((candidate) => candidate.score >= 300);
+    if (!candidates.length) return null;
+    return candidates.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      const ar = a.dialog.getBoundingClientRect();
+      const br = b.dialog.getBoundingClientRect();
+      return (ar.width * ar.height) - (br.width * br.height);
+    })[0].dialog;
+  }
+
+  function selectedReactionLabel(dialog) {
+    const selectedTab = dialog.querySelector('[role="tab"][aria-selected="true"]');
+    return selectedTab ? labelOf(selectedTab) : '';
   }
 
   function profileIdentityFromAnchor(anchor) {
@@ -189,9 +223,9 @@
 
   async function scanReactionDialog() {
     if (busy) return;
-    const dialog = findVisibleDialog();
+    const dialog = findReactionDialog();
     if (!dialog) {
-      setNotice('Nejdřív na příspěvku otevři seznam reakcí a zvol konkrétní reakci.', 'error');
+      setNotice('Nenalezen bezpečně rozpoznatelný dialog reakcí. Otevři seznam reakcí a zvol konkrétní reakci.', 'error');
       return;
     }
 
@@ -230,11 +264,12 @@
       const queue = [...profiles.values()].slice(0, limit);
       state.sourceUrl = location.href;
       state.queue = queue;
+      state.reactionLabel = selectedReactionLabel(dialog);
       state.currentIndex = 0;
       state.jobStatus = 'idle';
       state.maxProfiles = limit;
       state.log = [];
-      addLog(state, `Načteno ${queue.length} profilů z dialogu reakcí.`);
+      addLog(state, `Načteno ${queue.length} profilů z dialogu reakcí${state.reactionLabel ? ` (${state.reactionLabel})` : ''}.`);
       setState(state);
       setNotice(
         queue.length
@@ -644,6 +679,7 @@
     }, {});
     ui.querySelector('#fdb-summary').textContent =
       `Stav: ${statusText(state.jobStatus)} · profilů: ${state.queue.length}` +
+      (state.reactionLabel ? ` · vybraná reakce: ${state.reactionLabel}` : '') +
       (counts.blocked ? ` · blokováno: ${counts.blocked}` : '') +
       (counts.error ? ` · chyb: ${counts.error}` : '');
     ui.querySelector('#fdb-mode').value = state.mode;
@@ -687,7 +723,8 @@
   if (window.__FDB_TESTING__ === true) {
     window.__FDB_INTERNALS__ = {
       cleanProfileUrl,
-      findVisibleDialog,
+      findReactionDialog,
+      reactionDialogScore,
       findProfileOptionsButton,
       findBlockMenuItem,
       findConfirmationDialog,
