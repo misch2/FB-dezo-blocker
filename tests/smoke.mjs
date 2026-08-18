@@ -150,8 +150,13 @@ try {
 
     const confirmation = document.createElement('div');
     confirmation.setAttribute('role', 'dialog');
-    confirmation.innerHTML = '<p>Opravdu chcete blokovat profil Alice Example?</p><button>Blokovat</button><button>Zrušit</button>';
+    confirmation.innerHTML = '<h2>Zablokovat Alice Example?</h2><p>Alice už nebude moct zobrazit váš profil.</p><button>Zrušit</button><button>Potvrdit</button>';
     document.body.appendChild(confirmation);
+
+    const unrelatedConfirmation = document.createElement('div');
+    unrelatedConfirmation.setAttribute('role', 'dialog');
+    unrelatedConfirmation.innerHTML = '<h2>Smazat komentář?</h2><button>Zrušit</button><button>Potvrdit</button>';
+    document.body.appendChild(unrelatedConfirmation);
 
     const api = window.__FDB_INTERNALS__;
     const confirmationDialog = api.findConfirmationDialog({ name: 'Alice Example' });
@@ -160,7 +165,9 @@ try {
       reactionCounterIgnored: api.findProfileOptionsButton()?.element !== reactionCounter,
       menu: api.findBlockMenuItem()?.innerText === 'Blokovat',
       dialog: confirmationDialog === confirmation,
-      confirmation: api.findConfirmButton(confirmationDialog)?.innerText === 'Blokovat'
+      wrongTargetRejected: api.findConfirmationDialog({ name: 'Bob Example' }) !== confirmation,
+      confirmation: api.findConfirmButton(confirmationDialog, { name: 'Alice Example' })?.innerText === 'Potvrdit',
+      unrelatedConfirmationRejected: api.findConfirmButton(unrelatedConfirmation, { name: 'Alice Example' }) === null
     };
   });
   if (Object.values(selectorChecks).some((value) => !value)) {

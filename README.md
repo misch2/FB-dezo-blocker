@@ -34,7 +34,7 @@ Zkontroluj v nabídce Tampermonkey následující:
 6. Nech zvolený režim **Nanečisto** a klikni na **Spustit**.
 7. Pokud náhled odpovídá očekávání, načti dialog znovu a vyzkoušej **Asistovaný** režim s jedním testovacím profilem.
 
-Nikdy nepokračuj, pokud názvy v panelu přesně neodpovídají otevřenému seznamu reakcí. Verze 0.1.2 a novější zobrazuje v souhrnu také rozpoznanou vybranou reakci a odmítne skenovat, pokud bezpečně nerozezná dialog reakcí. Od verze 0.1.3 je u každého profilu zobrazena ikonka načtená přímo z jeho řádku na Facebooku; pokud některá ikonka chybí, asistovaný ani automatický režim nelze spustit. Fronty vytvořené staršími verzemi se po aktualizaci záměrně nenačítají.
+Nikdy nepokračuj, pokud názvy v panelu přesně neodpovídají otevřenému seznamu reakcí. Verze 0.1.2 a novější zobrazuje v souhrnu také rozpoznanou vybranou reakci a odmítne skenovat, pokud bezpečně nerozezná dialog reakcí. Od verze 0.1.3 je u každého profilu zobrazena ikonka načtená přímo z jeho řádku na Facebooku; pokud některá ikonka chybí, asistovaný ani automatický režim nelze spustit. Verze 0.1.4 podporuje nové facebookové potvrzovací tlačítko **Potvrdit**, ale přijme je pouze v dialogu s titulkem **Zablokovat [jméno]?**, který odpovídá právě zpracovávanému profilu. Fronty vytvořené staršími verzemi se po aktualizaci záměrně nenačítají.
 
 ## Ovládání a zotavení z chyby
 

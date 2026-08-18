@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Facebook Reaction Blocker (safe prototype)
 // @namespace    https://github.com/michal/facebook-dezo-blocker
-// @version      0.1.3
+// @version      0.1.4
 // @description  Collect profiles from an opened Facebook reaction dialog and block them one by one.
 // @author       FacebookDezoBlocker contributors
 // @match        https://www.facebook.com/*
@@ -46,6 +46,10 @@
     ],
     forbiddenBlock: [
       /message/i, /messages/i, /zpráv/i, /messenger/i
+    ],
+    confirm: [
+      /^confirm$/i,
+      /^potvrdit$/i
     ],
     more: [
       /^(see|show|view|load) more$/i,
@@ -385,22 +389,35 @@
     }) || null;
   }
 
-  function findConfirmationDialog(target) {
-    const dialogs = [...document.querySelectorAll('[role="dialog"]')].filter(visible);
-    return dialogs.find((dialog) => {
-      const text = compact(dialog.innerText);
-      const hasBlockWording = /\bblock\b/i.test(text) || /blokovat/i.test(text);
-      if (!hasBlockWording) return false;
-      const firstName = compact(target.name).split(' ')[0];
-      return !firstName || firstName === 'Neznámý' || text.toLocaleLowerCase().includes(firstName.toLocaleLowerCase());
-    }) || null;
+  function blockConfirmationTitle(dialog, target) {
+    if (!(dialog instanceof Element)) return '';
+    const titles = [...dialog.querySelectorAll('h1, h2, h3, h4, h5, h6, [role="heading"]')]
+      .filter(visible)
+      .map((element) => compact(element.innerText || element.getAttribute('aria-label')))
+      .filter(Boolean);
+    const title = titles.find((value) =>
+      /^(?:block|zablokovat|blokovat)(?:\s+(?:profile|profil|uživatele))?\s+.+\?$/i.test(value)
+    );
+    if (!title) return '';
+
+    const targetName = compact(target?.name);
+    if (!targetName || targetName === 'Neznámý') return title;
+    const firstName = targetName.split(' ')[0].toLocaleLowerCase();
+    return title.toLocaleLowerCase().includes(firstName) ? title : '';
   }
 
-  function findConfirmButton(dialog) {
+  function findConfirmationDialog(target) {
+    const dialogs = [...document.querySelectorAll('[role="dialog"]')].filter(visible);
+    return dialogs.find((dialog) => blockConfirmationTitle(dialog, target)) || null;
+  }
+
+  function findConfirmButton(dialog, target) {
+    if (!blockConfirmationTitle(dialog, target)) return null;
     return [...dialog.querySelectorAll('button, [role="button"]')].find((element) => {
       if (!visible(element)) return false;
       const label = labelOf(element);
-      return matchesAny(label, LABELS.block) && !matchesAny(label, LABELS.forbiddenBlock);
+      const isExplicitBlock = matchesAny(label, LABELS.block) && !matchesAny(label, LABELS.forbiddenBlock);
+      return isExplicitBlock || matchesAny(label, LABELS.confirm);
     }) || null;
   }
 
@@ -417,8 +434,8 @@
 
     const confirmation = await waitFor(() => findConfirmationDialog(target), 8000);
     if (!confirmation) throw new Error('Facebook nezobrazil rozpoznatelný potvrzovací dialog blokování.');
-    const confirmButton = findConfirmButton(confirmation);
-    if (!confirmButton) throw new Error('V dialogu nebylo nalezeno bezpečně rozpoznatelné tlačítko „Blokovat“ ani „Zablokovat“.');
+    const confirmButton = findConfirmButton(confirmation, target);
+    if (!confirmButton) throw new Error('V potvrzovacím dialogu blokování nebylo nalezeno tlačítko „Potvrdit“, „Blokovat“ ani „Zablokovat“.');
 
     if (state.mode === 'guided') {
       const approved = window.confirm(`Opravdu na Facebooku zablokovat profil „${target.name}“?`);
