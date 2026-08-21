@@ -2,6 +2,8 @@
 
 Tampermonkey skript, který načte profily z vybrané reakce u příspěvku na Facebooku a postupně je zablokuje.
 
+<img width="472" height="1051" alt="image" src="https://github.com/user-attachments/assets/b93d47b1-758c-43dd-b75b-75f9a8ceece6" />
+
 ## Instalace
 
 1. Nainstaluj [Tampermonkey](https://www.tampermonkey.net/).
