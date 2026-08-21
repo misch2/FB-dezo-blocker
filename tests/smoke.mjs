@@ -33,6 +33,29 @@ const browser = await chromium.launch({
   executablePath
 });
 const page = await browser.newPage();
+const userscriptSource = fs.readFileSync('facebook-reaction-blocker.user.js', 'utf8');
+
+async function installUserscriptEnvironment(targetPage) {
+  await targetPage.evaluate(() => {
+    const sessionValues = new Map();
+    Object.defineProperty(window, 'sessionStorage', {
+      configurable: true,
+      value: {
+        getItem: (key) => sessionValues.has(String(key)) ? sessionValues.get(String(key)) : null,
+        setItem: (key, value) => sessionValues.set(String(key), String(value)),
+        removeItem: (key) => sessionValues.delete(String(key))
+      }
+    });
+
+    window.__FDB_TESTING__ = true;
+    window.GM_addStyle = (css) => {
+      const style = document.createElement('style');
+      style.textContent = css;
+      document.head.appendChild(style);
+    };
+    window.GM_registerMenuCommand = () => {};
+  });
+}
 
 try {
   await page.setContent(`<!doctype html>
@@ -64,21 +87,9 @@ try {
       </div>
     </body></html>`);
 
-  await page.evaluate(() => {
-    const values = new Map();
-    window.__FDB_TESTING__ = true;
-    window.GM_getValue = (key, fallback) => values.has(key) ? values.get(key) : fallback;
-    window.GM_setValue = (key, value) => values.set(key, structuredClone(value));
-    window.GM_deleteValue = (key) => values.delete(key);
-    window.GM_addStyle = (css) => {
-      const style = document.createElement('style');
-      style.textContent = css;
-      document.head.appendChild(style);
-    };
-    window.GM_registerMenuCommand = () => {};
-  });
+  await installUserscriptEnvironment(page);
 
-  await page.addScriptTag({ content: fs.readFileSync('facebook-reaction-blocker.user.js', 'utf8') });
+  await page.addScriptTag({ content: userscriptSource });
   await page.locator('#fdb-panel').waitFor();
   const selectedDialogId = await page.evaluate(() => window.__FDB_INTERNALS__.findReactionDialog()?.id);
   if (selectedDialogId !== 'reactions-dialog') {
@@ -121,6 +132,27 @@ try {
   if (iconSources.some((src) => src !== 'https://scontent.example.fbcdn.net/reactions/haha.png')) {
     throw new Error(`Unexpected reaction icon sources: ${JSON.stringify(iconSources)}`);
   }
+
+  await page.evaluate(() => {
+    const state = JSON.parse(window.sessionStorage.getItem('fdb-job-v4'));
+    state.jobStatus = 'running';
+    window.sessionStorage.setItem('fdb-job-v4', JSON.stringify(state));
+  });
+  const secondPage = await browser.newPage();
+  try {
+    await secondPage.setContent('<!doctype html><html><body><main><h1>Druhé facebookové okno</h1></main></body></html>');
+    await installUserscriptEnvironment(secondPage);
+    await secondPage.addScriptTag({ content: userscriptSource });
+    await secondPage.locator('#fdb-panel').waitFor();
+    await secondPage.waitForTimeout(2000);
+    const secondSummary = await secondPage.locator('#fdb-summary').innerText();
+    if (!secondSummary.includes('připraveno') || !secondSummary.includes('profilů: 0')) {
+      throw new Error(`A separate Facebook tab inherited the running queue: ${secondSummary}`);
+    }
+  } finally {
+    await secondPage.close();
+  }
+
   const unsafeIconAccepted = await page.evaluate(() =>
     window.__FDB_INTERNALS__.safeReactionIconUrl('https://attacker.example/reaction.png')
   );
@@ -174,7 +206,7 @@ try {
     throw new Error(`Czech selector smoke checks failed: ${JSON.stringify(selectorChecks)}`);
   }
 
-  console.log('Smoke test passed: scan, deduplication, filtering, dry-run UI and Czech action selectors.');
+  console.log('Smoke test passed: scan, tab-isolated queue, deduplication, filtering, dry-run UI and Czech action selectors.');
 } finally {
   await browser.close();
 }

@@ -1,23 +1,22 @@
 // ==UserScript==
 // @name         Facebook Reaction Blocker (safe prototype)
-// @namespace    https://github.com/michal/facebook-dezo-blocker
-// @version      0.1.5
+// @namespace    https://github.com/misch2/FB-dezo-blocker
+// @version      0.1.6
 // @description  Collect profiles from an opened Facebook reaction dialog and block them one by one.
-// @author       FacebookDezoBlocker contributors
+// @author       Michal Schwarz
 // @match        https://www.facebook.com/*
 // @match        https://facebook.com/*
 // @run-at       document-idle
 // @grant        GM_addStyle
-// @grant        GM_deleteValue
-// @grant        GM_getValue
 // @grant        GM_registerMenuCommand
-// @grant        GM_setValue
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  const STORAGE_KEY = 'fdb-job-v3';
+  // A job must follow a single browsing context through profile navigations,
+  // not leak into every Facebook tab that Tampermonkey runs the script in.
+  const STORAGE_KEY = 'fdb-job-v4';
   const PANEL_ID = 'fdb-panel';
   const MAX_SCAN_ROUNDS = 80;
   const NO_GROWTH_LIMIT = 5;
@@ -74,7 +73,7 @@
 
   function defaultState() {
     return {
-      version: 3,
+      version: 4,
       sourceUrl: '',
       queue: [],
       currentIndex: 0,
@@ -94,13 +93,24 @@
   }
 
   function getState() {
-    const state = GM_getValue(STORAGE_KEY, null);
-    return state && state.version === 3 ? { ...defaultState(), ...state } : defaultState();
+    try {
+      const serializedState = window.sessionStorage.getItem(STORAGE_KEY);
+      const state = serializedState ? JSON.parse(serializedState) : null;
+      return state && state.version === 4 ? { ...defaultState(), ...state } : defaultState();
+    } catch (_error) {
+      return defaultState();
+    }
   }
 
   function setState(state) {
-    GM_setValue(STORAGE_KEY, state);
+    try {
+      window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (error) {
+      setNotice(`Úlohu nelze uložit pouze pro toto okno: ${error.message}`, 'error');
+      return false;
+    }
     render(state);
+    return true;
   }
 
   function addLog(state, message) {
@@ -625,7 +635,12 @@
 
   function clearJob() {
     if (!window.confirm('Vymazat načtenou frontu a místní protokol?')) return;
-    GM_deleteValue(STORAGE_KEY);
+    try {
+      window.sessionStorage.removeItem(STORAGE_KEY);
+    } catch (error) {
+      setNotice(`Frontu nelze vymazat: ${error.message}`, 'error');
+      return;
+    }
     render(defaultState());
     setNotice('Fronta byla vymazána.', 'ok');
   }
@@ -655,7 +670,7 @@
   function panelMarkup() {
     return `
       <header>
-        <strong>Reaction Blocker 0.1.5</strong>
+        <strong>Reaction Blocker 0.1.6</strong>
         <button id="fdb-collapse" class="fdb-icon" title="Sbalit">−</button>
       </header>
       <div id="fdb-body">

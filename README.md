@@ -42,4 +42,5 @@ Pro první ostrý test nastav maximum na jeden profil a použij asistovaný rež
 
 - Facebook může své rozhraní změnit. Pokud skript potřebný prvek nerozpozná, pozastaví se.
 - Blokování se vztahuje pouze na konkrétní profil. Další profily stejného člověka Facebook pouze částečně omezí a skript je nedokáže spolehlivě dohledat.
-- Fronta a protokol zůstávají uložené pouze v Tampermonkey a neposílají se na externí server.
+- Fronta, stav běhu a protokol jsou uložené jen pro aktuální kartu/okno Facebooku. Při přechodech mezi profily v tomto okně zůstanou zachované; další facebookové okno nezačne stejný běh.
+- Data se neposílají na externí server.
