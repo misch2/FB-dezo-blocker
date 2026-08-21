@@ -8,15 +8,11 @@ Tampermonkey skript, který načte profily z vybrané reakce u příspěvku na F
 
 1. Nainstaluj [Tampermonkey](https://www.tampermonkey.net/).
 2. V nastavení rozšíření zapni **Allow User Scripts / Povolit uživatelské skripty**.
-3. V Tampermonkey zvol **Create a new script / Vytvořit nový skript**.
-4. Vlož obsah souboru [`facebook-reaction-blocker.user.js`](./facebook-reaction-blocker.user.js) a ulož ho pomocí `Ctrl+S`.
-5. Obnov Facebook pomocí `Ctrl+R`. Vpravo se zobrazí panel **Reaction Blocker**.
+3. Otevři [instalační odkaz](https://raw.githubusercontent.com/misch2/FB-dezo-blocker/main/facebook-reaction-blocker.user.js) a v Tampermonkey potvrď instalaci.
+4. Obnov Facebook pomocí `Ctrl+R`. Vpravo se zobrazí panel **Reaction Blocker**.
 
 Pokud panel chybí, zkontroluj, že je Tampermonkey i skript zapnutý, rozšíření má přístup k Facebooku a volba **Allow User Scripts** je povolená.
-
-### Aktualizace
-
-Pro automatické aktualizace instaluj skript z [této URL](https://raw.githubusercontent.com/misch2/FB-dezo-blocker/main/facebook-reaction-blocker.user.js), ne ručním vložením do editoru. Tampermonkey pak podle svého nastaveného intervalu vyhledá novější `@version`. Při každé vydané změně zvyš `@version` a odešli ji do větve `main`.
+Tampermonkey bude podle svého nastavení automaticky vyhledávat a instalovat nové verze skriptu.
 
 ## Použití
 

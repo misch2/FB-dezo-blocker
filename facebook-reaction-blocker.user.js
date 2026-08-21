@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Facebook Reaction Blocker
 // @namespace    https://github.com/misch2/FB-dezo-blocker
-// @version      0.1.7
+// @version      0.1.8
 // @description  Collect profiles from an opened Facebook reaction dialog and block them one by one.
 // @author       Michal Schwarz
 // @homepageURL  https://github.com/misch2/FB-dezo-blocker
