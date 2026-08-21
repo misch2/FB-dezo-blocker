@@ -1,9 +1,12 @@
 // ==UserScript==
 // @name         Facebook Reaction Blocker
 // @namespace    https://github.com/misch2/FB-dezo-blocker
-// @version      0.1.6
+// @version      0.1.7
 // @description  Collect profiles from an opened Facebook reaction dialog and block them one by one.
 // @author       Michal Schwarz
+// @homepageURL  https://github.com/misch2/FB-dezo-blocker
+// @updateURL    https://raw.githubusercontent.com/misch2/FB-dezo-blocker/main/facebook-reaction-blocker.user.js
+// @downloadURL  https://raw.githubusercontent.com/misch2/FB-dezo-blocker/main/facebook-reaction-blocker.user.js
 // @match        https://www.facebook.com/*
 // @match        https://facebook.com/*
 // @run-at       document-idle
@@ -670,7 +673,7 @@
   function panelMarkup() {
     return `
       <header>
-        <strong>Reaction Blocker 0.1.6</strong>
+        <strong>Reaction Blocker 0.1.7</strong>
         <button id="fdb-collapse" class="fdb-icon" title="Sbalit">−</button>
       </header>
       <div id="fdb-body">

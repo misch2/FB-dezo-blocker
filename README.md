@@ -14,6 +14,10 @@ Tampermonkey skript, který načte profily z vybrané reakce u příspěvku na F
 
 Pokud panel chybí, zkontroluj, že je Tampermonkey i skript zapnutý, rozšíření má přístup k Facebooku a volba **Allow User Scripts** je povolená.
 
+### Aktualizace
+
+Pro automatické aktualizace instaluj skript z [této URL](https://raw.githubusercontent.com/misch2/FB-dezo-blocker/main/facebook-reaction-blocker.user.js), ne ručním vložením do editoru. Tampermonkey pak podle svého nastaveného intervalu vyhledá novější `@version`. Při každé vydané změně zvyš `@version` a odešli ji do větve `main`.
+
 ## Použití
 
 1. Otevři konkrétní příspěvek.
