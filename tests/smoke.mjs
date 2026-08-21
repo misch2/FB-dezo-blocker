@@ -32,7 +32,13 @@ const browser = await chromium.launch({
   headless: true,
   executablePath
 });
-const page = await browser.newPage();
+const context = await browser.newContext();
+await context.route('https://www.facebook.com/**', (route) => route.fulfill({
+  status: 200,
+  contentType: 'text/html',
+  body: '<!doctype html><html><body></body></html>'
+}));
+const page = await context.newPage();
 const userscriptSource = fs.readFileSync('facebook-reaction-blocker.user.js', 'utf8');
 
 async function installUserscriptEnvironment(targetPage) {
@@ -47,6 +53,23 @@ async function installUserscriptEnvironment(targetPage) {
       }
     });
 
+    // Tampermonkey values are shared between Facebook tabs, unlike the job
+    // queue above. localStorage is only the synchronous backing store for
+    // this test double; the userscript still has to use the GM_* API.
+    const gmPrefix = '__fdb-test-gm:';
+    window.GM_getValue = (key, fallback) => {
+      const serialized = window.localStorage.getItem(`${gmPrefix}${String(key)}`);
+      if (serialized === null) return fallback;
+      try {
+        return JSON.parse(serialized);
+      } catch (_error) {
+        return serialized;
+      }
+    };
+    window.GM_setValue = (key, value) => {
+      window.localStorage.setItem(`${gmPrefix}${String(key)}`, JSON.stringify(value));
+    };
+
     window.__FDB_TESTING__ = true;
     window.GM_addStyle = (css) => {
       const style = document.createElement('style');
@@ -58,6 +81,7 @@ async function installUserscriptEnvironment(targetPage) {
 }
 
 try {
+  await page.goto('https://www.facebook.com/test-page', { waitUntil: 'commit' });
   await page.setContent(`<!doctype html>
     <html><body>
       <main><h1>Testovací příspěvek</h1></main>
@@ -138,8 +162,9 @@ try {
     state.jobStatus = 'running';
     window.sessionStorage.setItem('fdb-job-v4', JSON.stringify(state));
   });
-  const secondPage = await browser.newPage();
+  const secondPage = await context.newPage();
   try {
+    await secondPage.goto('https://www.facebook.com/second-tab', { waitUntil: 'commit' });
     await secondPage.setContent('<!doctype html><html><body><main><h1>Druhé facebookové okno</h1></main></body></html>');
     await installUserscriptEnvironment(secondPage);
     await secondPage.addScriptTag({ content: userscriptSource });
@@ -206,7 +231,109 @@ try {
     throw new Error(`Czech selector smoke checks failed: ${JSON.stringify(selectorChecks)}`);
   }
 
-  console.log('Smoke test passed: scan, tab-isolated queue, deduplication, filtering, dry-run UI and Czech action selectors.');
+  // Regression fixture: a reaction list larger than the former hard cap of
+  // 200 profiles. Keep the first two rows because the earlier assertions
+  // cover deduplication and profile-name selection.
+  await page.evaluate(() => {
+    const dialog = document.querySelector('#reactions-dialog');
+    for (let index = 3; index <= 250; index += 1) {
+      const row = document.createElement('div');
+      row.className = 'profile-row';
+      row.style.cssText = 'display:flex; width:450px; height:52px';
+      row.innerHTML = `
+        <a href="https://www.facebook.com/fixture-profile-${index}"><svg role="img" aria-label="Fixture Profile ${index}" width="40" height="40"></svg></a>
+        <img data-reaction src="https://scontent.example.fbcdn.net/reactions/haha.png" alt="" style="width:16px; height:16px">
+        <a href="https://www.facebook.com/fixture-profile-${index}">Fixture Profile ${index}</a>
+        <button>Přidat přítele</button>`;
+      dialog.appendChild(row);
+    }
+  });
+
+  await page.locator('#fdb-max').fill('1000');
+  await page.locator('#fdb-mode').selectOption('automatic');
+  const selectedSettingsBeforeScan = await page.locator('#fdb-mode').inputValue();
+  const maxBeforeScan = await page.locator('#fdb-max').inputValue();
+  if (selectedSettingsBeforeScan !== 'automatic' || maxBeforeScan !== '1000') {
+    throw new Error(`Could not set regression settings before scan: mode=${selectedSettingsBeforeScan}, max=${maxBeforeScan}`);
+  }
+
+  // The production scanner intentionally waits between rounds. Make only
+  // this scan's waits immediate so the 250-profile fixture stays a smoke test.
+  await page.evaluate(() => {
+    window.__FDB_REAL_SET_TIMEOUT__ = window.setTimeout;
+    window.setTimeout = (callback) => {
+      callback();
+      return 0;
+    };
+  });
+  try {
+    await page.locator('#fdb-scan').click();
+    await page.waitForFunction(() => {
+      const notice = document.querySelector('#fdb-notice');
+      return notice && !notice.textContent.includes('Načítám');
+    }, { timeout: 10000 });
+  } finally {
+    await page.evaluate(() => {
+      window.setTimeout = window.__FDB_REAL_SET_TIMEOUT__;
+      delete window.__FDB_REAL_SET_TIMEOUT__;
+    });
+  }
+
+  const largeScanNotice = await page.locator('#fdb-notice').innerText();
+  if (!largeScanNotice.includes('Hotovo: 250 profilů včetně ikon reakcí.')) {
+    throw new Error(`The scan did not retain all profiles above 200: ${largeScanNotice}`);
+  }
+  const largeQueueSize = await page.evaluate(() => {
+    const state = JSON.parse(window.sessionStorage.getItem('fdb-job-v4'));
+    return state?.queue?.length;
+  });
+  if (largeQueueSize !== 250) {
+    throw new Error(`Expected 250 queued profiles, got ${largeQueueSize}`);
+  }
+  const selectedSettingsAfterScan = await page.locator('#fdb-mode').inputValue();
+  const maxAfterScan = await page.locator('#fdb-max').inputValue();
+  if (selectedSettingsAfterScan !== 'automatic' || maxAfterScan !== '1000') {
+    throw new Error(`Scan reset user settings: mode=${selectedSettingsAfterScan}, max=${maxAfterScan}`);
+  }
+
+  const settingsPage = await context.newPage();
+  try {
+    await settingsPage.goto('https://www.facebook.com/settings-tab', { waitUntil: 'commit' });
+    await settingsPage.setContent('<!doctype html><html><body><main><h1>Jiná facebooková stránka</h1></main></body></html>');
+    await installUserscriptEnvironment(settingsPage);
+    await settingsPage.addScriptTag({ content: userscriptSource });
+    await settingsPage.locator('#fdb-panel').waitFor();
+    const sharedSettings = await settingsPage.evaluate(() => ({
+      mode: document.querySelector('#fdb-mode').value,
+      maxProfiles: document.querySelector('#fdb-max').value,
+      summary: document.querySelector('#fdb-summary').textContent
+    }));
+    if (sharedSettings.mode !== 'automatic' || sharedSettings.maxProfiles !== '1000') {
+      throw new Error(`Settings did not persist to a separate Facebook tab: ${JSON.stringify(sharedSettings)}`);
+    }
+    if (!sharedSettings.summary.includes('připraveno') || !sharedSettings.summary.includes('profilů: 0')) {
+      throw new Error(`The separate Facebook tab inherited the job queue: ${sharedSettings.summary}`);
+    }
+  } finally {
+    await settingsPage.close();
+  }
+
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.locator('#fdb-clear').click();
+  await page.waitForFunction(() => document.querySelector('#fdb-summary')?.textContent.includes('profilů: 0'));
+  const settingsAfterClear = await page.evaluate(() => ({
+    mode: document.querySelector('#fdb-mode').value,
+    maxProfiles: document.querySelector('#fdb-max').value,
+    queueStorage: window.sessionStorage.getItem('fdb-job-v4')
+  }));
+  if (settingsAfterClear.mode !== 'automatic' || settingsAfterClear.maxProfiles !== '1000') {
+    throw new Error(`Clearing the queue reset saved settings: ${JSON.stringify(settingsAfterClear)}`);
+  }
+  if (settingsAfterClear.queueStorage !== null) {
+    throw new Error('Clearing the queue left job state in sessionStorage.');
+  }
+
+  console.log('Smoke test passed: settings persistence, >200-profile scan, tab-isolated queue, deduplication, filtering, dry-run UI and Czech action selectors.');
 } finally {
   await browser.close();
 }

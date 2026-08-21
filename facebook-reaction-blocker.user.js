@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Facebook Reaction Blocker
 // @namespace    https://github.com/misch2/FB-dezo-blocker
-// @version      0.1.8
+// @version      0.1.9
 // @description  Collect profiles from an opened Facebook reaction dialog and block them one by one.
 // @author       Michal Schwarz
 // @homepageURL  https://github.com/misch2/FB-dezo-blocker
@@ -11,7 +11,9 @@
 // @match        https://facebook.com/*
 // @run-at       document-idle
 // @grant        GM_addStyle
+// @grant        GM_getValue
 // @grant        GM_registerMenuCommand
+// @grant        GM_setValue
 // ==/UserScript==
 
 (function () {
@@ -20,6 +22,8 @@
   // A job must follow a single browsing context through profile navigations,
   // not leak into every Facebook tab that Tampermonkey runs the script in.
   const STORAGE_KEY = 'fdb-job-v4';
+  const SETTINGS_KEY = 'fdb-settings-v1';
+  const JOB_STATE_VERSION = 5;
   const PANEL_ID = 'fdb-panel';
   const MAX_SCAN_ROUNDS = 80;
   const NO_GROWTH_LIMIT = 5;
@@ -74,13 +78,8 @@
   const matchesAny = (value, patterns) => patterns.some((pattern) => pattern.test(compact(value)));
   const nowText = () => new Date().toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-  function defaultState() {
+  function defaultSettings() {
     return {
-      version: 4,
-      sourceUrl: '',
-      queue: [],
-      currentIndex: 0,
-      jobStatus: 'idle',
       mode: 'dry',
       timings: {
         clickMin: 1500,
@@ -88,10 +87,99 @@
         profileMin: 5000,
         profileMax: 8000
       },
-      maxProfiles: 25,
+      maxProfiles: 25
+    };
+  }
+
+  function defaultJobState() {
+    return {
+      version: JOB_STATE_VERSION,
+      sourceUrl: '',
+      queue: [],
+      currentIndex: 0,
+      jobStatus: 'idle',
       reactionLabel: '',
       log: [],
       createdAt: new Date().toISOString()
+    };
+  }
+
+  function defaultState() {
+    return { ...defaultJobState(), ...getSettings() };
+  }
+
+  function normalizeSettings(candidate, fallback = defaultSettings()) {
+    const source = candidate && typeof candidate === 'object' ? candidate : {};
+    const sourceTimings = source.timings && typeof source.timings === 'object' ? source.timings : {};
+    const baseTimings = fallback.timings || defaultSettings().timings;
+    const clickMin = normalizeNumber(sourceTimings.clickMin, baseTimings.clickMin, 1000, 60000);
+    const clickMax = normalizeNumber(sourceTimings.clickMax, baseTimings.clickMax, clickMin, 60000);
+    const profileMin = normalizeNumber(sourceTimings.profileMin, baseTimings.profileMin, 1000, 300000);
+    const profileMax = normalizeNumber(sourceTimings.profileMax, baseTimings.profileMax, profileMin, 300000);
+    return {
+      mode: ['dry', 'guided', 'automatic'].includes(source.mode) ? source.mode : fallback.mode,
+      timings: { clickMin, clickMax, profileMin, profileMax },
+      maxProfiles: normalizeNumber(source.maxProfiles, fallback.maxProfiles, 1)
+    };
+  }
+
+  function normalizeNumber(value, fallback, min, max) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    const rounded = Math.round(number);
+    if (!Number.isFinite(rounded)) return fallback;
+    const atLeastMinimum = Math.max(min, rounded);
+    return max === undefined ? atLeastMinimum : Math.min(max, atLeastMinimum);
+  }
+
+  function readTampermonkeyValue(key, fallback) {
+    try {
+      return typeof GM_getValue === 'function' ? GM_getValue(key, fallback) : fallback;
+    } catch (_error) {
+      return fallback;
+    }
+  }
+
+  function writeTampermonkeyValue(key, value) {
+    try {
+      if (typeof GM_setValue === 'function') GM_setValue(key, value);
+      return true;
+    } catch (error) {
+      setNotice(`Nastavení nelze uložit: ${error.message}`, 'error');
+      return false;
+    }
+  }
+
+  function getSettings(legacySettings = null) {
+    const storedSettings = readTampermonkeyValue(SETTINGS_KEY, null);
+    if (storedSettings !== null && storedSettings !== undefined) {
+      return normalizeSettings(storedSettings);
+    }
+
+    const settings = normalizeSettings(legacySettings || defaultSettings());
+    if (legacySettings) writeTampermonkeyValue(SETTINGS_KEY, settings);
+    return settings;
+  }
+
+  function setSettings(settings) {
+    const normalized = normalizeSettings(settings, getSettings());
+    return writeTampermonkeyValue(SETTINGS_KEY, normalized);
+  }
+
+  function persistSettingsFromUi() {
+    setSettings(readSettings());
+  }
+
+  function jobStateForStorage(state) {
+    return {
+      version: JOB_STATE_VERSION,
+      sourceUrl: state.sourceUrl,
+      queue: state.queue,
+      currentIndex: state.currentIndex,
+      jobStatus: state.jobStatus,
+      reactionLabel: state.reactionLabel,
+      log: state.log,
+      createdAt: state.createdAt
     };
   }
 
@@ -99,7 +187,11 @@
     try {
       const serializedState = window.sessionStorage.getItem(STORAGE_KEY);
       const state = serializedState ? JSON.parse(serializedState) : null;
-      return state && state.version === 4 ? { ...defaultState(), ...state } : defaultState();
+      const isSupportedVersion = state && [4, JOB_STATE_VERSION].includes(state.version);
+      const legacySettings = isSupportedVersion && state.version === 4 ? state : null;
+      return isSupportedVersion
+        ? { ...defaultJobState(), ...state, ...getSettings(legacySettings) }
+        : defaultState();
     } catch (_error) {
       return defaultState();
     }
@@ -107,7 +199,7 @@
 
   function setState(state) {
     try {
-      window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(jobStateForStorage(state)));
     } catch (error) {
       setNotice(`Úlohu nelze uložit pouze pro toto okno: ${error.message}`, 'error');
       return false;
@@ -284,6 +376,8 @@
 
   async function scanReactionDialog() {
     if (busy) return;
+    const scanSettings = readSettings();
+    setSettings(scanSettings);
     const dialog = findReactionDialog();
     if (!dialog) {
       setNotice('Nenalezen bezpečně rozpoznatelný dialog reakcí. Otevři seznam reakcí a zvol konkrétní reakci.', 'error');
@@ -321,7 +415,9 @@
 
       collectProfiles(dialog, profiles);
       const state = getState();
-      const limit = readNumber('fdb-max', state.maxProfiles, 1, 200);
+      const settings = readSettings();
+      setSettings(settings);
+      const limit = settings.maxProfiles;
       const queue = [...profiles.values()].slice(0, limit);
       const missingIcons = queue.filter((target) => !target.reactionIconUrl).length;
       state.sourceUrl = location.href;
@@ -329,6 +425,8 @@
       state.reactionLabel = selectedReactionLabel(dialog);
       state.currentIndex = 0;
       state.jobStatus = 'idle';
+      state.mode = settings.mode;
+      state.timings = settings.timings;
       state.maxProfiles = limit;
       state.log = [];
       addLog(state, `Načteno ${queue.length} profilů z dialogu reakcí${state.reactionLabel ? ` (${state.reactionLabel})` : ''}.`);
@@ -470,31 +568,34 @@
     return 'blocked';
   }
 
-  function readSettings(state) {
+  function readSettings(fallback = getSettings()) {
     const modeElement = document.querySelector('#fdb-mode');
-    const mode = modeElement ? modeElement.value : state.mode;
-    const clickMin = readNumber('fdb-click-min', state.timings.clickMin, 1000, 60000);
-    const clickMax = readNumber('fdb-click-max', state.timings.clickMax, clickMin, 60000);
-    const profileMin = readNumber('fdb-profile-min', state.timings.profileMin, 1000, 300000);
-    const profileMax = readNumber('fdb-profile-max', state.timings.profileMax, profileMin, 300000);
-    const maxProfiles = readNumber('fdb-max', state.maxProfiles, 1, 200);
-    return { mode, timings: { clickMin, clickMax, profileMin, profileMax }, maxProfiles };
+    const mode = modeElement ? modeElement.value : fallback.mode;
+    const clickMin = readNumber('fdb-click-min', fallback.timings.clickMin, 1000, 60000);
+    const clickMax = readNumber('fdb-click-max', fallback.timings.clickMax, clickMin, 60000);
+    const profileMin = readNumber('fdb-profile-min', fallback.timings.profileMin, 1000, 300000);
+    const profileMax = readNumber('fdb-profile-max', fallback.timings.profileMax, profileMin, 300000);
+    const maxProfiles = readNumber('fdb-max', fallback.maxProfiles, 1);
+    return normalizeSettings({ mode, timings: { clickMin, clickMax, profileMin, profileMax }, maxProfiles }, fallback);
   }
 
   function readNumber(id, fallback, min, max) {
     const value = Number(document.getElementById(id)?.value);
-    return Number.isFinite(value) ? Math.min(max, Math.max(min, Math.round(value))) : fallback;
+    return Number.isFinite(value)
+      ? (max === undefined ? Math.max(min, Math.round(value)) : Math.min(max, Math.max(min, Math.round(value))))
+      : fallback;
   }
 
   async function startJob() {
     if (busy) return;
+    const settings = readSettings();
+    setSettings(settings);
     const state = getState();
     if (!state.queue.length) {
       setNotice('Fronta je prázdná. Nejdřív načti profily z dialogu reakcí.', 'error');
       return;
     }
 
-    const settings = readSettings(state);
     state.mode = settings.mode;
     state.timings = settings.timings;
     state.maxProfiles = settings.maxProfiles;
@@ -673,7 +774,7 @@
   function panelMarkup() {
     return `
       <header>
-        <strong>Reaction Blocker 0.1.7</strong>
+        <strong>Reaction Blocker 0.1.9</strong>
         <button id="fdb-collapse" class="fdb-icon" title="Sbalit">−</button>
       </header>
       <div id="fdb-body">
@@ -692,7 +793,7 @@
           <label>Mezi profily od (ms)<input id="fdb-profile-min" type="number" min="1000" step="500"></label>
           <label>do (ms)<input id="fdb-profile-max" type="number" min="1000" step="500"></label>
         </div>
-        <label>Maximum profilů v jednom běhu<input id="fdb-max" type="number" min="1" max="200"></label>
+        <label>Maximum profilů v jednom běhu<input id="fdb-max" type="number" min="1"></label>
         <div id="fdb-summary"></div>
         <div id="fdb-list"></div>
         <div id="fdb-notice" aria-live="polite"></div>
@@ -768,6 +869,12 @@
     ui.querySelector('#fdb-stop').addEventListener('click', stopJob);
     ui.querySelector('#fdb-source').addEventListener('click', returnToSource);
     ui.querySelector('#fdb-clear').addEventListener('click', clearJob);
+    ['#fdb-mode', '#fdb-click-min', '#fdb-click-max', '#fdb-profile-min', '#fdb-profile-max', '#fdb-max']
+      .forEach((selector) => {
+        const control = ui.querySelector(selector);
+        control.addEventListener('input', persistSettingsFromUi);
+        control.addEventListener('change', persistSettingsFromUi);
+      });
     render(getState());
   }
 
@@ -782,12 +889,13 @@
       (state.reactionLabel ? ` · vybraná reakce: ${state.reactionLabel}` : '') +
       (counts.blocked ? ` · blokováno: ${counts.blocked}` : '') +
       (counts.error ? ` · chyb: ${counts.error}` : '');
-    ui.querySelector('#fdb-mode').value = state.mode;
-    ui.querySelector('#fdb-click-min').value = state.timings.clickMin;
-    ui.querySelector('#fdb-click-max').value = state.timings.clickMax;
-    ui.querySelector('#fdb-profile-min').value = state.timings.profileMin;
-    ui.querySelector('#fdb-profile-max').value = state.timings.profileMax;
-    ui.querySelector('#fdb-max').value = state.maxProfiles;
+    const settings = getSettings();
+    ui.querySelector('#fdb-mode').value = settings.mode;
+    ui.querySelector('#fdb-click-min').value = settings.timings.clickMin;
+    ui.querySelector('#fdb-click-max').value = settings.timings.clickMax;
+    ui.querySelector('#fdb-profile-min').value = settings.timings.profileMin;
+    ui.querySelector('#fdb-profile-max').value = settings.timings.profileMax;
+    ui.querySelector('#fdb-max').value = settings.maxProfiles;
 
     const start = Math.max(0, Math.min(state.currentIndex - 2, state.queue.length - 8));
     const shown = state.queue.slice(start, start + 8);
