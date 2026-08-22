@@ -4,7 +4,7 @@ Tampermonkey skript, který načte profily z vybrané reakce u příspěvku na F
 
 Původní nápad: [@Ro_Kolar2](https://x.com/Ro_Kolar2)
 
-<img width="472" height="1051" alt="image" src="https://github.com/user-attachments/assets/b93d47b1-758c-43dd-b75b-75f9a8ceece6" />
+<img width="504" height="1258" alt="image" src="https://github.com/user-attachments/assets/dcc9dd89-633e-45fd-8eca-646a0a9c3711" />
 
 ## Instalace
 
