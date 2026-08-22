@@ -2,11 +2,12 @@
 
 Tampermonkey skript, který načte profily z vybrané reakce u příspěvku na Facebooku a postupně je zablokuje.
 
-Člověk, který přidá vyšklebeného smajlíka ke článku o smrti dětí po útoku ruské armády, je totiž bez jakýchkoli pochyb obyčejná lidská svině, a nemá smysl ho na FB omylem vídávat.
+Člověk, který přidá vyšklebeného smajlíka ke článku o smrti dětí po útoku ruské armády, je totiž obyčejná bezvýznamná svině, a nemá smysl ho na FB omylem vídávat.
 
 Původní nápad: [@Ro_Kolar2](https://x.com/Ro_Kolar2)
 
-<img width="504" height="1258" alt="image" src="https://github.com/user-attachments/assets/dcc9dd89-633e-45fd-8eca-646a0a9c3711" />
+<img width="481" height="1217" alt="image" src="https://github.com/user-attachments/assets/c7a7d915-1463-47d4-a106-c2b989f10236" />
+
 
 ## Instalace
 
