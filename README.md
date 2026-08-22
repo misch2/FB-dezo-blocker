@@ -2,6 +2,8 @@
 
 Tampermonkey skript, který načte profily z vybrané reakce u příspěvku na Facebooku a postupně je zablokuje.
 
+Původní nápad: [@Ro_Kolar2](https://x.com/Ro_Kolar2)
+
 <img width="472" height="1051" alt="image" src="https://github.com/user-attachments/assets/b93d47b1-758c-43dd-b75b-75f9a8ceece6" />
 
 ## Instalace
@@ -22,6 +24,7 @@ Tampermonkey bude podle svého nastavení automaticky vyhledávat a instalovat n
 4. Zkontroluj počet, jména a ikonky reakcí načtených profilů.
 5. Nejprve spusť režim **Nanečisto**.
 6. Pokud seznam souhlasí, načti reakci znovu a použij **Asistovaný** nebo **Automatický** režim.
+7. Celá načtená fronta je vidět ve vlastním posuvném seznamu. Aktuální profil se při běhu automaticky zobrazí.
 
 ### Režimy
 
@@ -33,12 +36,15 @@ Pro první ostrý test nastav maximum na jeden profil a použij asistovaný rež
 
 ## Ovládání
 
-- **Pauza** – pozastaví zpracování.
-- **Pokračovat** – zopakuje aktuální krok po pozastavení nebo chybě.
-- **Přeskočit** – přeskočí aktuální profil.
-- **Stop** – ukončí běh a ponechá načtenou frontu.
-- **Zpět na příspěvek** – vrátí se k původnímu příspěvku.
-- **Vymazat frontu** – smaže načtené profily a protokol.
+- **▶ Spustit** – zahájí zpracování fronty.
+- **⏸ Pauza** – pozastaví zpracování. Stejné kontextové tlačítko se po pozastavení změní na **▶ Pokračovat**.
+- **↻ Spustit znovu** – po dokončení zpracuje jen přeskočené a chybové profily; již zablokované profily se nikdy neopakují.
+- **⏭ Přeskočit** – přeskočí aktuální profil. Při přeskočení posledního profilu se běh také dokončí.
+- **■ Stop** – ukončí běh a ponechá načtenou frontu. Po dokončení už není aktivní.
+- **Zpět na příspěvek** – vrátí se k původnímu příspěvku; během běhu je tlačítko zablokované.
+- **Vymazat frontu** – smaže načtené profily a protokol. Během běhu je nutné nejprve použít **Stop**.
+
+Po úspěšném dokončení ostrého běhu se zobrazí oznámení „Blokování doběhlo úspěšně do konce.“. Facebookový dialog s výsledkem zůstává otevřený, aby jej bylo možné ručně zavřít.
 
 ## Omezení
 

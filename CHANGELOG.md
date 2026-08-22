@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.10 - 2026-08-22
+
+- Reworked the panel controls into one context-sensitive run button with icon and accessible text.
+- Rendered the complete queue in a scrollable list and automatically kept the current profile visible.
+- Simplified the queue header and result metrics; moved return-to-post and clear actions to their dedicated areas.
+- Added safe retry semantics: `Spustit znovu` retries only skipped and failed profiles and never reprocesses blocked profiles.
+- Unified completion handling, including completion after skipping the last profile, and disabled Stop after completion.
+- Added a one-time browser alert after successful real runs while leaving Facebook's result dialog open.
+
 ## 0.1.9 - 2026-08-21
 
 - Removed the hidden 200-profile limit; values such as 1000 are now accepted.

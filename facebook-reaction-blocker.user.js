@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Facebook Reaction Blocker
 // @namespace    https://github.com/misch2/FB-dezo-blocker
-// @version      0.1.9
+// @version      0.1.10
 // @description  Collect profiles from an opened Facebook reaction dialog and block them one by one.
 // @author       Michal Schwarz
 // @homepageURL  https://github.com/misch2/FB-dezo-blocker
@@ -99,6 +99,8 @@
       currentIndex: 0,
       jobStatus: 'idle',
       reactionLabel: '',
+      completionAlertShown: false,
+      runBlockedCount: 0,
       log: [],
       createdAt: new Date().toISOString()
     };
@@ -178,6 +180,8 @@
       currentIndex: state.currentIndex,
       jobStatus: state.jobStatus,
       reactionLabel: state.reactionLabel,
+      completionAlertShown: Boolean(state.completionAlertShown),
+      runBlockedCount: Number.isFinite(Number(state.runBlockedCount)) ? Number(state.runBlockedCount) : 0,
       log: state.log,
       createdAt: state.createdAt
     };
@@ -428,6 +432,8 @@
       state.mode = settings.mode;
       state.timings = settings.timings;
       state.maxProfiles = limit;
+      state.completionAlertShown = false;
+      state.runBlockedCount = 0;
       state.log = [];
       addLog(state, `Načteno ${queue.length} profilů z dialogu reakcí${state.reactionLabel ? ` (${state.reactionLabel})` : ''}.`);
       setState(state);
@@ -441,6 +447,7 @@
       );
     } finally {
       busy = false;
+      render(getState());
     }
   }
 
@@ -586,6 +593,48 @@
       : fallback;
   }
 
+  const RETRYABLE_STATUSES = new Set(['pending', 'error', 'skipped', 'preview', 'working']);
+  const PROCESSABLE_STATUSES = new Set(['pending', 'error']);
+
+  function firstProcessableIndex(state) {
+    return state.queue.findIndex((target) => PROCESSABLE_STATUSES.has(target.status));
+  }
+
+  function prepareRetry(state) {
+    state.queue = state.queue.map((target) => {
+      if (!RETRYABLE_STATUSES.has(target.status) || target.status === 'pending') return target;
+      return { ...target, status: 'pending', note: '' };
+    });
+    const firstPending = firstProcessableIndex(state);
+    if (firstPending < 0) return false;
+    state.currentIndex = firstPending;
+    state.completionAlertShown = false;
+    state.runBlockedCount = 0;
+    return true;
+  }
+
+  function completeJob(state, message = 'Hotovo. Fronta byla zpracována.', allowAlert = true) {
+    const wasComplete = state.jobStatus === 'complete';
+    state.currentIndex = state.queue.length;
+    state.jobStatus = 'complete';
+    if (!wasComplete) addLog(state, 'Fronta dokončena.');
+
+    const counts = state.queue.reduce((result, target) => {
+      result[target.status] = (result[target.status] || 0) + 1;
+      return result;
+    }, {});
+    const shouldAlert = allowAlert
+      && state.mode !== 'dry'
+      && counts.blocked > 0
+      && state.runBlockedCount > 0
+      && !counts.error
+      && !state.completionAlertShown;
+    if (shouldAlert) state.completionAlertShown = true;
+    setState(state);
+    setNotice(message, 'ok');
+    if (shouldAlert) window.alert('Blokování doběhlo úspěšně do konce.');
+  }
+
   async function startJob() {
     if (busy) return;
     const settings = readSettings();
@@ -601,37 +650,49 @@
     state.maxProfiles = settings.maxProfiles;
     state.queue = state.queue.slice(0, settings.maxProfiles);
 
-    if (state.mode === 'dry') {
-      state.queue = state.queue.map((target) => ({ ...target, status: 'preview', note: 'Bez zásahu' }));
-      state.currentIndex = state.queue.length;
-      state.jobStatus = 'complete';
-      addLog(state, `Režim nanečisto dokončen pro ${state.queue.length} profilů; nic nebylo změněno.`);
-      setState(state);
-      setNotice('Režim nanečisto dokončen. Nebyl zablokován žádný profil.', 'ok');
+    if (state.jobStatus === 'complete' && !prepareRetry(state)) {
+      setNotice('Ve frontě není žádný profil, který by bylo možné znovu zpracovat.', 'ok');
       return;
     }
 
-    const missingIcons = state.queue.filter((target) => !target.reactionIconUrl).length;
+    if (state.mode === 'dry') {
+      state.queue = state.queue.map((target) => target.status === 'blocked'
+        ? target
+        : { ...target, status: 'preview', note: 'Bez zásahu' });
+      state.currentIndex = state.queue.length;
+      state.completionAlertShown = false;
+      state.runBlockedCount = 0;
+      addLog(state, `Režim nanečisto dokončen pro ${state.queue.length} profilů; nic nebylo změněno.`);
+      completeJob(state, 'Režim nanečisto dokončen. Nebyl zablokován žádný profil.');
+      return;
+    }
+
+    const processableQueue = state.queue.filter((target) => PROCESSABLE_STATUSES.has(target.status));
+    const missingIcons = processableQueue.filter((target) => !target.reactionIconUrl).length;
     if (missingIcons) {
       setNotice(`Ostrý režim nelze spustit: u ${missingIcons} profilů chybí načtená ikonka reakce. Načti seznam reakcí znovu.`, 'error');
       return;
     }
 
+    const remaining = processableQueue.length;
+    if (!remaining) {
+      completeJob(state, 'Ve frontě není žádný profil, který by bylo možné zpracovat.', false);
+      return;
+    }
     const warning = state.mode === 'automatic'
-      ? `Automatický režim skutečně zablokuje až ${state.queue.length} profilů bez dalšího potvrzení. Pokračovat?`
-      : `Asistovaný režim otevře až ${state.queue.length} profilů a před každým blokováním se zeptá. Pokračovat?`;
+      ? `Automatický režim skutečně zablokuje až ${remaining} profilů bez dalšího potvrzení. Pokračovat?`
+      : `Asistovaný režim otevře až ${remaining} profilů a před každým blokováním se zeptá. Pokračovat?`;
     if (!window.confirm(warning)) return;
 
-    const restartFromPreview = state.currentIndex >= state.queue.length || state.queue.some((target) => target.status === 'preview');
-    state.queue = state.queue.map((target) => target.status === 'preview'
-      ? { ...target, status: 'pending', note: '' }
-      : target);
-    state.currentIndex = restartFromPreview ? 0 : Math.min(state.currentIndex, state.queue.length - 1);
-    if (!currentTarget(state) || !['pending', 'error'].includes(currentTarget(state).status)) {
-      const firstPending = state.queue.findIndex((target) => ['pending', 'error'].includes(target.status));
-      state.currentIndex = firstPending >= 0 ? firstPending : 0;
+    const firstPending = firstProcessableIndex(state);
+    if (firstPending < 0) {
+      completeJob(state, undefined, false);
+      return;
     }
+    state.currentIndex = firstPending;
     state.jobStatus = 'running';
+    state.completionAlertShown = false;
+    state.runBlockedCount = 0;
     addLog(state, `Spuštěn ${state.mode === 'guided' ? 'asistovaný' : 'automatický'} režim.`);
     setState(state);
     await resumeJob();
@@ -641,13 +702,16 @@
     if (busy) return;
     let state = getState();
     if (state.jobStatus !== 'running') return;
-    const target = currentTarget(state);
-    if (!target) {
-      state.jobStatus = 'complete';
-      addLog(state, 'Fronta dokončena.');
+    let target = currentTarget(state);
+    if (!target || !PROCESSABLE_STATUSES.has(target.status)) {
+      const firstPending = firstProcessableIndex(state);
+      if (firstPending < 0) {
+        completeJob(state);
+        return;
+      }
+      state.currentIndex = firstPending;
+      target = currentTarget(state);
       setState(state);
-      setNotice('Fronta je dokončena.', 'ok');
-      return;
     }
 
     if (!sameProfile(location.href, target.url)) {
@@ -662,18 +726,34 @@
     try {
       const result = await automateBlock(target, state);
       state = getState();
-      const freshTarget = currentTarget(state);
-      freshTarget.status = result;
-      freshTarget.note = result === 'blocked' ? 'Zablokováno' : 'Přeskočeno uživatelem';
-      addLog(state, `${freshTarget.name}: ${freshTarget.note}.`);
-      state.currentIndex += 1;
-
-      if (state.currentIndex >= state.queue.length) {
-        state.jobStatus = 'complete';
+      if (state.jobStatus !== 'running') {
+        const interruptedTarget = currentTarget(state);
+        if (interruptedTarget?.status === 'working') {
+          interruptedTarget.status = result;
+          interruptedTarget.note = result === 'blocked' ? 'Zablokováno' : 'Přeskočeno uživatelem';
+          if (result === 'blocked') state.runBlockedCount = (state.runBlockedCount || 0) + 1;
+          addLog(state, `${interruptedTarget.name}: ${interruptedTarget.note}.`);
+          state.currentIndex += 1;
+        }
         setState(state);
-        setNotice('Hotovo. Fronta byla zpracována.', 'ok');
         return;
       }
+      const freshTarget = currentTarget(state);
+      if (!freshTarget) {
+        completeJob(state);
+        return;
+      }
+      freshTarget.status = result;
+      freshTarget.note = result === 'blocked' ? 'Zablokováno' : 'Přeskočeno uživatelem';
+      if (result === 'blocked') state.runBlockedCount = (state.runBlockedCount || 0) + 1;
+      addLog(state, `${freshTarget.name}: ${freshTarget.note}.`);
+      state.currentIndex += 1;
+      const nextPending = firstProcessableIndex(state);
+      if (nextPending < 0) {
+        completeJob(state);
+        return;
+      }
+      state.currentIndex = nextPending;
 
       setState(state);
       const delay = randomBetween(state.timings.profileMin, state.timings.profileMax);
@@ -683,6 +763,15 @@
       if (state.jobStatus === 'running') location.assign(currentTarget(state).url);
     } catch (error) {
       state = getState();
+      if (state.jobStatus === 'stopped') {
+        const interruptedTarget = currentTarget(state);
+        if (interruptedTarget?.status === 'working') {
+          interruptedTarget.status = 'pending';
+          interruptedTarget.note = 'Zastaveno před dokončením';
+        }
+        setState(state);
+        return;
+      }
       const failedTarget = currentTarget(state);
       if (failedTarget) {
         failedTarget.status = 'error';
@@ -694,11 +783,13 @@
       setNotice(`${error.message} Úloha byla pozastavena.`, 'error');
     } finally {
       busy = false;
+      render(getState());
     }
   }
 
   function pauseJob() {
     const state = getState();
+    if (state.jobStatus !== 'running') return;
     state.jobStatus = 'paused';
     addLog(state, 'Úloha pozastavena uživatelem.');
     setState(state);
@@ -706,9 +797,19 @@
   }
 
   async function continueJob() {
+    if (busy) return;
     const state = getState();
-    if (!state.queue.length || state.currentIndex >= state.queue.length) return;
-    if (currentTarget(state)?.status === 'working') currentTarget(state).status = 'pending';
+    if (!state.queue.length || !['paused', 'stopped'].includes(state.jobStatus)) return;
+    if (currentTarget(state)?.status === 'working') {
+      currentTarget(state).status = 'pending';
+      currentTarget(state).note = '';
+    }
+    const firstPending = firstProcessableIndex(state);
+    if (firstPending < 0) {
+      setNotice('Ve frontě není žádný profil, který by bylo možné pokračovat.', 'ok');
+      return;
+    }
+    state.currentIndex = firstPending;
     state.jobStatus = 'running';
     addLog(state, 'Úloha znovu spuštěna.');
     setState(state);
@@ -716,21 +817,32 @@
   }
 
   async function skipCurrent() {
+    if (busy) return;
     const state = getState();
     const target = currentTarget(state);
-    if (!target) return;
+    if (!target || target.status === 'blocked' || state.jobStatus === 'complete') return;
+    const wasRunning = state.jobStatus === 'running';
     target.status = 'skipped';
     target.note = 'Ručně přeskočeno';
     addLog(state, `${target.name}: ručně přeskočeno.`);
     state.currentIndex += 1;
-    state.jobStatus = state.currentIndex < state.queue.length ? 'running' : 'complete';
+    const nextPending = firstProcessableIndex(state);
+    if (nextPending < 0) {
+      completeJob(state);
+      return;
+    }
+    state.currentIndex = nextPending;
+    if (wasRunning) state.jobStatus = 'running';
     setState(state);
-    if (state.jobStatus === 'running') await resumeJob();
+    if (wasRunning) await resumeJob();
   }
 
   function stopJob() {
+    const currentState = getState();
+    if (!['running', 'paused'].includes(currentState.jobStatus)) return;
     if (!window.confirm('Ukončit úlohu? Dosud provedená blokování nelze vrátit tímto skriptem.')) return;
     const state = getState();
+    if (!['running', 'paused'].includes(state.jobStatus)) return;
     state.jobStatus = 'stopped';
     addLog(state, 'Úloha ukončena uživatelem.');
     setState(state);
@@ -738,6 +850,11 @@
   }
 
   function clearJob() {
+    const state = getState();
+    if (busy || ['running', 'paused'].includes(state.jobStatus)) {
+      setNotice('Frontu nelze vymazat během běhu. Nejdřív použij Stop.', 'error');
+      return;
+    }
     if (!window.confirm('Vymazat načtenou frontu a místní protokol?')) return;
     try {
       window.sessionStorage.removeItem(STORAGE_KEY);
@@ -747,6 +864,19 @@
     }
     render(defaultState());
     setNotice('Fronta byla vymazána.', 'ok');
+  }
+
+  async function handleRunAction() {
+    const state = getState();
+    if (state.jobStatus === 'running') {
+      pauseJob();
+    } else if (busy) {
+      return;
+    } else if (['paused', 'stopped'].includes(state.jobStatus)) {
+      await continueJob();
+    } else {
+      await startJob();
+    }
   }
 
   function returnToSource() {
@@ -765,6 +895,23 @@
     return ({ pending: '○', working: '◌', blocked: '✓', skipped: '↷', error: '!', preview: '·' })[status] || '○';
   }
 
+  function targetStatusLabel(status) {
+    return ({
+      pending: 'čeká', working: 'zpracovává se', blocked: 'zablokováno',
+      skipped: 'přeskočeno', error: 'chyba', preview: 'náhled'
+    })[status] || 'čeká';
+  }
+
+  function runButtonState(status) {
+    return ({
+      idle: { icon: '▶', label: 'Spustit', title: 'Spustit zpracování fronty' },
+      running: { icon: '⏸', label: 'Pauza', title: 'Pozastavit zpracování fronty' },
+      paused: { icon: '▶', label: 'Pokračovat', title: 'Pokračovat ve zpracování fronty' },
+      stopped: { icon: '▶', label: 'Pokračovat', title: 'Pokračovat ve zpracování fronty' },
+      complete: { icon: '↻', label: 'Spustit znovu', title: 'Znovu zpracovat přeskočené a chybové profily' }
+    })[status] || { icon: '▶', label: 'Spustit', title: 'Spustit zpracování fronty' };
+  }
+
   function escapeHtml(value) {
     return String(value).replace(/[&<>'"]/g, (character) => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
@@ -774,7 +921,7 @@
   function panelMarkup() {
     return `
       <header>
-        <strong>Reaction Blocker 0.1.9</strong>
+        <strong>Reaction Blocker 0.1.10</strong>
         <button id="fdb-collapse" class="fdb-icon" title="Sbalit">−</button>
       </header>
       <div id="fdb-body">
@@ -794,19 +941,23 @@
           <label>do (ms)<input id="fdb-profile-max" type="number" min="1000" step="500"></label>
         </div>
         <label>Maximum profilů v jednom běhu<input id="fdb-max" type="number" min="1"></label>
-        <div id="fdb-summary"></div>
-        <div id="fdb-list"></div>
-        <div id="fdb-notice" aria-live="polite"></div>
-        <div class="fdb-actions">
-          <button id="fdb-start" class="fdb-danger">Spustit</button>
-          <button id="fdb-pause">Pauza</button>
-          <button id="fdb-continue">Pokračovat</button>
-          <button id="fdb-skip">Přeskočit</button>
-          <button id="fdb-stop">Stop</button>
-          <button id="fdb-source">Zpět na příspěvek</button>
-          <button id="fdb-clear">Vymazat frontu</button>
+        <div id="fdb-summary">
+          <div class="fdb-queue-heading">
+            <strong id="fdb-list-heading">Fronta (0)</strong>
+            <button id="fdb-source" title="Vrátit se k původnímu příspěvku"><span aria-hidden="true">↩</span> Zpět na příspěvek</button>
+          </div>
+          <span id="fdb-compat-summary" class="fdb-visually-hidden"></span>
         </div>
+        <div id="fdb-list" role="list" aria-labelledby="fdb-list-heading"></div>
+        <div class="fdb-actions">
+          <button id="fdb-run" data-role="run" class="fdb-danger"><span class="fdb-button-icon" aria-hidden="true">▶</span> <span class="fdb-button-label">Spustit</span></button>
+          <button id="fdb-skip"><span class="fdb-button-icon" aria-hidden="true">⏭</span> Přeskočit</button>
+          <button id="fdb-stop"><span class="fdb-button-icon" aria-hidden="true">■</span> Stop</button>
+        </div>
+        <div id="fdb-notice" aria-live="polite"></div>
+        <div id="fdb-metrics" aria-live="polite"></div>
         <details><summary>Protokol</summary><pre id="fdb-log"></pre></details>
+        <div class="fdb-maintenance"><button id="fdb-clear"><span class="fdb-button-icon" aria-hidden="true">⌫</span> Vymazat frontu</button></div>
         <p class="fdb-warning">Facebook může rozhraní kdykoli změnit. Před ostrým během ověř režim nanečisto.</p>
       </div>`;
   }
@@ -833,10 +984,14 @@
       #${PANEL_ID} .fdb-primary { width: 100%; color: white; background: #1877f2; border-color: #1877f2; }
       #${PANEL_ID} .fdb-danger { color: white; background: #c62828; border-color: #c62828; }
       #${PANEL_ID} .fdb-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-      #${PANEL_ID} #fdb-summary { margin-top: 10px; padding: 7px; border-radius: 5px; background: #f0f2f5; }
-      #${PANEL_ID} #fdb-list { max-height: 125px; overflow: auto; margin-top: 6px; border: 1px solid #e4e6eb; border-radius: 5px; }
-      #${PANEL_ID} .fdb-row { display: flex; gap: 6px; padding: 4px 6px; border-bottom: 1px solid #eee; }
+      #${PANEL_ID} #fdb-summary { margin-top: 10px; }
+      #${PANEL_ID} .fdb-queue-heading { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+      #${PANEL_ID} .fdb-queue-heading strong { font-size: 14px; }
+      #${PANEL_ID} .fdb-queue-heading button { padding: 4px 6px; font-size: 11px; }
+      #${PANEL_ID} #fdb-list { max-height: 250px; overflow: auto; margin-top: 6px; border: 1px solid #e4e6eb; border-radius: 5px; }
+      #${PANEL_ID} .fdb-row { display: flex; gap: 6px; align-items: center; padding: 4px 6px; border-bottom: 1px solid #eee; }
       #${PANEL_ID} .fdb-row:last-child { border-bottom: 0; }
+      #${PANEL_ID} .fdb-row.fdb-current { background: #e7f0fd; outline: 1px solid #1877f2; outline-offset: -1px; }
       #${PANEL_ID} .fdb-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       #${PANEL_ID} .fdb-reaction-icon { flex: 0 0 auto; width: 18px; height: 18px; object-fit: contain; }
       #${PANEL_ID} .fdb-reaction-missing { flex: 0 0 auto; width: 18px; color: #b3261e; text-align: center; font-weight: bold; }
@@ -847,6 +1002,10 @@
       #${PANEL_ID} #fdb-notice.working { display: block; background: #e7f0fd; color: #174ea6; }
       #${PANEL_ID} details { margin-top: 8px; }
       #${PANEL_ID} pre { max-height: 100px; overflow: auto; white-space: pre-wrap; font-size: 11px; }
+      #${PANEL_ID} #fdb-metrics { margin-top: 7px; color: #4b4f56; font-size: 12px; }
+      #${PANEL_ID} .fdb-maintenance { display: flex; justify-content: flex-end; margin-top: 7px; }
+      #${PANEL_ID} .fdb-button-icon { display: inline-block; min-width: 1em; text-align: center; }
+      #${PANEL_ID} .fdb-visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
       #${PANEL_ID} .fdb-help, #${PANEL_ID} .fdb-warning { margin: 0 0 9px; color: #606770; }
       #${PANEL_ID} .fdb-warning { margin: 10px 0 0; font-size: 11px; }
     `);
@@ -862,9 +1021,7 @@
       ui.querySelector('#fdb-collapse').textContent = ui.classList.contains('collapsed') ? '+' : '−';
     });
     ui.querySelector('#fdb-scan').addEventListener('click', scanReactionDialog);
-    ui.querySelector('#fdb-start').addEventListener('click', startJob);
-    ui.querySelector('#fdb-pause').addEventListener('click', pauseJob);
-    ui.querySelector('#fdb-continue').addEventListener('click', continueJob);
+    ui.querySelector('#fdb-run').addEventListener('click', handleRunAction);
     ui.querySelector('#fdb-skip').addEventListener('click', skipCurrent);
     ui.querySelector('#fdb-stop').addEventListener('click', stopJob);
     ui.querySelector('#fdb-source').addEventListener('click', returnToSource);
@@ -884,11 +1041,8 @@
       result[target.status] = (result[target.status] || 0) + 1;
       return result;
     }, {});
-    ui.querySelector('#fdb-summary').textContent =
-      `Stav: ${statusText(state.jobStatus)} · profilů: ${state.queue.length}` +
-      (state.reactionLabel ? ` · vybraná reakce: ${state.reactionLabel}` : '') +
-      (counts.blocked ? ` · blokováno: ${counts.blocked}` : '') +
-      (counts.error ? ` · chyb: ${counts.error}` : '');
+    ui.querySelector('#fdb-list-heading').textContent = `Fronta (${state.queue.length})`;
+    ui.querySelector('#fdb-compat-summary').textContent = `Stav: ${statusText(state.jobStatus)} · profilů: ${state.queue.length}`;
     const settings = getSettings();
     ui.querySelector('#fdb-mode').value = settings.mode;
     ui.querySelector('#fdb-click-min').value = settings.timings.clickMin;
@@ -897,23 +1051,37 @@
     ui.querySelector('#fdb-profile-max').value = settings.timings.profileMax;
     ui.querySelector('#fdb-max').value = settings.maxProfiles;
 
-    const start = Math.max(0, Math.min(state.currentIndex - 2, state.queue.length - 8));
-    const shown = state.queue.slice(start, start + 8);
-    ui.querySelector('#fdb-list').innerHTML = shown.length
-      ? shown.map((target, index) => `
-          <div class="fdb-row" title="${escapeHtml(target.note || target.url)}">
+    const focusIndex = state.currentIndex < state.queue.length ? state.currentIndex : state.queue.length - 1;
+    ui.querySelector('#fdb-list').innerHTML = state.queue.length
+      ? state.queue.map((target, index) => `
+          <div class="fdb-row${index === focusIndex && ['running', 'paused', 'stopped'].includes(state.jobStatus) ? ' fdb-current' : ''}" data-index="${index}" role="listitem" aria-posinset="${index + 1}" aria-setsize="${state.queue.length}"${index === focusIndex && ['running', 'paused', 'stopped'].includes(state.jobStatus) ? ' aria-current="true"' : ''} title="${escapeHtml(target.note || target.url)}" aria-label="${escapeHtml(`${index + 1}. ${target.name}, ${targetStatusLabel(target.status)}`)}">
             ${target.reactionIconUrl
-              ? `<img class="fdb-reaction-icon" src="${escapeHtml(target.reactionIconUrl)}" alt="Načtená reakce">`
+              ? `<img class="fdb-reaction-icon" src="${escapeHtml(target.reactionIconUrl)}" alt="Načtená reakce" loading="lazy">`
               : '<span class="fdb-reaction-missing" title="Ikonka reakce nebyla načtena">!</span>'}
-            <span class="fdb-name">${escapeHtml(`${start + index + 1}. ${target.name}`)}</span>
-            <span class="fdb-target-status" title="Stav zpracování">${targetStatusIcon(target.status)}</span>
+            <span class="fdb-name">${escapeHtml(`${index + 1}. ${target.name}`)}</span>
+            <span class="fdb-target-status" title="${escapeHtml(`Stav: ${targetStatusLabel(target.status)}`)}" aria-label="${escapeHtml(targetStatusLabel(target.status))}">${targetStatusIcon(target.status)}</span>
           </div>`).join('')
       : '<div class="fdb-row"><span>Fronta je prázdná.</span></div>';
+    ui.querySelector('#fdb-metrics').textContent =
+      `Blokováno: ${counts.blocked || 0}  Přeskočeno: ${counts.skipped || 0}  Chyby: ${counts.error || 0}`;
     ui.querySelector('#fdb-log').textContent = (state.log || []).join('\n');
-    ui.querySelector('#fdb-pause').disabled = state.jobStatus !== 'running';
-    ui.querySelector('#fdb-continue').disabled = !['paused', 'stopped'].includes(state.jobStatus);
-    ui.querySelector('#fdb-skip').disabled = !currentTarget(state);
-    ui.querySelector('#fdb-source').disabled = !state.sourceUrl;
+    const runButton = ui.querySelector('#fdb-run');
+    const runState = runButtonState(state.jobStatus);
+    runButton.querySelector('.fdb-button-icon').textContent = runState.icon;
+    runButton.querySelector('.fdb-button-label').textContent = runState.label;
+    runButton.title = runState.title;
+    runButton.setAttribute('aria-label', `${runState.label}. ${runState.title}`);
+    runButton.disabled = busy && state.jobStatus !== 'running';
+    const target = currentTarget(state);
+    ui.querySelector('#fdb-scan').disabled = busy || ['running', 'paused'].includes(state.jobStatus);
+    ui.querySelector('#fdb-skip').disabled = busy || !target || target.status === 'blocked' || state.jobStatus === 'complete';
+    ui.querySelector('#fdb-stop').disabled = !['running', 'paused'].includes(state.jobStatus);
+    ui.querySelector('#fdb-source').disabled = busy || !state.sourceUrl || ['running', 'paused'].includes(state.jobStatus);
+    ui.querySelector('#fdb-clear').disabled = busy || ['running', 'paused'].includes(state.jobStatus);
+    if (['running', 'paused', 'stopped'].includes(state.jobStatus)) {
+      const currentRow = ui.querySelector(`#fdb-list [data-index="${focusIndex}"]`);
+      if (currentRow && typeof currentRow.scrollIntoView === 'function') currentRow.scrollIntoView({ block: 'nearest' });
+    }
   }
 
   function setNotice(message, type) {
